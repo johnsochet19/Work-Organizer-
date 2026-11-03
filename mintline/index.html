@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Mintline - Crypto Tracker</title>
+  <meta name="description" content="Live crypto prices, price alerts and portfolio tracking.">
+  <meta name="theme-color" content="#0b1412">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="icons/icon.svg" alt="" width="28" height="28">
+      <span>Mintline</span>
+    </div>
+    <div class="topbar-actions">
+      <span id="status" class="status" title="Data status"></span>
+      <select id="currency" aria-label="Currency">
+        <option value="usd">USD</option>
+        <option value="eur">EUR</option>
+        <option value="gbp">GBP</option>
+        <option value="cad">CAD</option>
+        <option value="aud">AUD</option>
+        <option value="jpy">JPY</option>
+        <option value="btc">BTC</option>
+      </select>
+      <button id="refresh" class="icon-btn" aria-label="Refresh prices" title="Refresh">&#x21bb;</button>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="markets" class="active">Markets</button>
+    <button role="tab" data-tab="watchlist">Watchlist</button>
+    <button role="tab" data-tab="portfolio">Portfolio</button>
+    <button role="tab" data-tab="alerts">Alerts <span id="alert-badge" class="badge" hidden></span></button>
+  </nav>
+
+  <main>
+    <!-- Markets -->
+    <section id="tab-markets" class="panel active">
+      <div id="global" class="global-strip"></div>
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Search coins…" autocomplete="off">
+        <select id="sort" aria-label="Sort by">
+          <option value="rank">Rank</option>
+          <option value="price">Price</option>
+          <option value="change24">24h %</option>
+          <option value="change7d">7d %</option>
+          <option value="volume">Volume</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table class="coins">
+          <thead>
+            <tr>
+              <th class="star-col"></th>
+              <th class="num-col">#</th>
+              <th>Coin</th>
+              <th class="r">Price</th>
+              <th class="r hide-sm">1h</th>
+              <th class="r">24h</th>
+              <th class="r hide-sm">7d</th>
+              <th class="r hide-md">Market cap</th>
+              <th class="r hide-md">Last 7 days</th>
+            </tr>
+          </thead>
+          <tbody id="markets-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Watchlist -->
+    <section id="tab-watchlist" class="panel">
+      <div class="table-wrap">
+        <table class="coins">
+          <thead>
+            <tr>
+              <th class="star-col"></th>
+              <th class="num-col">#</th>
+              <th>Coin</th>
+              <th class="r">Price</th>
+              <th class="r hide-sm">1h</th>
+              <th class="r">24h</th>
+              <th class="r hide-sm">7d</th>
+              <th class="r hide-md">Market cap</th>
+              <th class="r hide-md">Last 7 days</th>
+            </tr>
+          </thead>
+          <tbody id="watchlist-body"></tbody>
+        </table>
+      </div>
+      <p id="watchlist-empty" class="empty" hidden>Star coins in Markets to add them to your watchlist.</p>
+    </section>
+
+    <!-- Portfolio -->
+    <section id="tab-portfolio" class="panel">
+      <div class="summary-cards">
+        <div class="card"><div class="label">Total value</div><div id="pf-value" class="big">—</div></div>
+        <div class="card"><div class="label">24h change</div><div id="pf-24h" class="big">—</div></div>
+        <div class="card"><div class="label">Total profit / loss</div><div id="pf-pl" class="big">—</div></div>
+        <div class="card"><div class="label">Cost basis</div><div id="pf-cost" class="big">—</div></div>
+      </div>
+      <div class="pf-grid">
+        <div class="card">
+          <div class="card-head">
+            <h2>Holdings</h2>
+            <button id="add-holding" class="btn">+ Add transaction</button>
+          </div>
+          <div class="table-wrap">
+            <table class="holdings">
+              <thead>
+                <tr>
+                  <th>Coin</th>
+                  <th class="r">Price</th>
+                  <th class="r">Holdings</th>
+                  <th class="r hide-sm">Avg buy</th>
+                  <th class="r">P / L</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="holdings-body"></tbody>
+            </table>
+          </div>
+          <p id="holdings-empty" class="empty" hidden>No holdings yet. Add a transaction to start tracking.</p>
+        </div>
+        <div class="card">
+          <h2>Allocation</h2>
+          <div id="allocation"></div>
+        </div>
+      </div>
+      <div class="pf-actions">
+        <button id="export" class="btn ghost">Export data</button>
+        <label class="btn ghost">Import data<input id="import" type="file" accept="application/json" hidden></label>
+      </div>
+    </section>
+
+    <!-- Alerts -->
+    <section id="tab-alerts" class="panel">
+      <div class="card">
+        <div class="card-head">
+          <h2>Price alerts</h2>
+          <div class="row-gap">
+            <button id="enable-notif" class="btn ghost">Enable notifications</button>
+            <button id="add-alert" class="btn">+ New alert</button>
+          </div>
+        </div>
+        <ul id="alerts-list" class="alerts"></ul>
+        <p id="alerts-empty" class="empty" hidden>No alerts. Create one to get notified when a coin crosses a price.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span id="updated"></span>
+    <span>Data: <a href="https://www.coingecko.com" target="_blank" rel="noopener">CoinGecko</a></span>
+  </footer>
+
+  <!-- Coin detail -->
+  <dialog id="detail" class="sheet">
+    <div class="sheet-head">
+      <div id="detail-title" class="detail-title"></div>
+      <button class="icon-btn" data-close aria-label="Close">&times;</button>
+    </div>
+    <div id="detail-price" class="detail-price"></div>
+    <div class="ranges" id="ranges">
+      <button data-days="1">24H</button>
+      <button data-days="7" class="active">7D</button>
+      <button data-days="30">30D</button>
+      <button data-days="90">90D</button>
+      <button data-days="365">1Y</button>
+    </div>
+    <div id="chart" class="chart"></div>
+    <div id="detail-stats" class="stats"></div>
+    <div class="sheet-actions">
+      <button id="detail-star" class="btn ghost"></button>
+      <button id="detail-alert" class="btn ghost">Set alert</button>
+      <button id="detail-hold" class="btn">Add to portfolio</button>
+    </div>
+  </dialog>
+
+  <!-- Holding form -->
+  <dialog id="holding-dialog" class="sheet small">
+    <form id="holding-form" method="dialog">
+      <div class="sheet-head">
+        <h2>Add transaction</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Close">&times;</button>
+      </div>
+      <div class="seg" role="radiogroup">
+        <label><input type="radio" name="type" value="buy" checked><span>Buy</span></label>
+        <label><input type="radio" name="type" value="sell"><span>Sell</span></label>
+      </div>
+      <label class="field">Coin
+        <select name="coin" required></select>
+      </label>
+      <label class="field">Quantity
+        <input name="amount" type="number" step="any" min="0" required placeholder="0.00">
+      </label>
+      <label class="field">Price per coin (<span class="cur-label"></span>)
+        <input name="price" type="number" step="any" min="0" required>
+      </label>
+      <div class="field total">Total: <strong id="tx-total">—</strong></div>
+      <div class="sheet-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Alert form -->
+  <dialog id="alert-dialog" class="sheet small">
+    <form id="alert-form" method="dialog">
+      <div class="sheet-head">
+        <h2>New price alert</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Close">&times;</button>
+      </div>
+      <label class="field">Coin
+        <select name="coin" required></select>
+      </label>
+      <div class="field">Notify me when price goes
+        <div class="seg">
+          <label><input type="radio" name="dir" value="above" checked><span>Above</span></label>
+          <label><input type="radio" name="dir" value="below"><span>Below</span></label>
+        </div>
+      </div>
+      <label class="field">Target price (<span class="cur-label"></span>)
+        <input name="price" type="number" step="any" min="0" required>
+      </label>
+      <p class="hint" id="alert-hint"></p>
+      <div class="sheet-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn">Create alert</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
