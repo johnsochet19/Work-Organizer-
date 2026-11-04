@@ -648,10 +648,19 @@
   }
 
   // ---------- Toasts ----------
-  function toast(msg, kind = '') {
+  function toast(msg, kind = '', action = null) {
     const el = document.createElement('div');
     el.className = `toast ${kind}`;
-    el.textContent = msg;
+    const span = document.createElement('span');
+    span.textContent = msg;
+    el.appendChild(span);
+    if (action) {
+      const b = document.createElement('button');
+      b.className = 'toast-action';
+      b.textContent = action.label;
+      b.onclick = () => { action.run(); el.remove(); };
+      el.appendChild(b);
+    }
     const box = $('#toasts');
     box.appendChild(el);
     while (box.children.length > 3) box.firstElementChild.remove();
@@ -748,9 +757,13 @@
       if (!b) return;
       const id = b.dataset.delHolding;
       const name = state.coinMap.get(id)?.name || id;
-      if (!confirm(`Remove all ${name} transactions from your portfolio?`)) return;
+      const removed = state.txs.filter((t) => t.coinId === id);
       state.txs = state.txs.filter((t) => t.coinId !== id);
       persist(); renderPortfolio();
+      toast(`Removed ${name} from your portfolio`, '', {
+        label: 'Undo',
+        run: () => { state.txs.push(...removed); persist(); renderPortfolio(); },
+      });
     });
 
     // Alerts
