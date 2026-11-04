@@ -1,0 +1,9 @@
+date,type,asset,quantity,price_usd,fee_usd,exchange,notes
+2024-01-10,buy,BTC,0.10,46000,15,coinbase,
+2024-03-05,buy,ETH,2.0,3500,10,kraken,
+2024-06-01,buy,BTC,0.05,67000,10,coinbase,
+2025-02-15,sell,BTC,0.08,96000,20,coinbase,partial take-profit
+2025-04-01,income,ETH,0.05,1800,0,kraken,staking reward
+2025-05-20,transfer,ETH,1.0,0,0,ledger,moved to cold wallet
+2026-01-12,buy,SOL,20,140,5,coinbase,
+2026-08-03,sell,ETH,0.5,4200,8,kraken,

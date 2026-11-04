@@ -1,0 +1,11 @@
+{
+  "alerts": [
+    {"name": "BTC above 80k",      "type": "price_above",      "symbol": "BTC", "value": 80000, "cooldown_minutes": 240},
+    {"name": "BTC below 70k",      "type": "price_below",      "symbol": "BTC", "value": 70000},
+    {"name": "ETH big move",       "type": "change_24h_above", "symbol": "ETH", "value": 8},
+    {"name": "BTC RSI oversold",   "type": "rsi_below",        "symbol": "BTC", "value": 30, "interval": "1h"},
+    {"name": "BTC 200d cross up",  "type": "cross_above_sma",  "symbol": "BTC", "period": 200, "interval": "1d"},
+    {"name": "Extreme fear",       "type": "fear_greed_below", "value": 20, "cooldown_minutes": 1440},
+    {"name": "Overheated funding", "type": "funding_apr_above","symbol": "PF_XBTUSD", "value": 30}
+  ]
+}

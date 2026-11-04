@@ -1,0 +1,5 @@
+.env
+.alert_state.json
+.bot_state.json
+*.html
+__pycache__/

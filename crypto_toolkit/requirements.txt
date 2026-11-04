@@ -1,0 +1,5 @@
+requests>=2.31
+pandas>=2.0
+numpy>=1.24
+plotly>=5.18
+ccxt>=4.0        # only needed for live trading / extra exchanges
