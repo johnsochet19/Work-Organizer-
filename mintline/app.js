@@ -853,7 +853,7 @@
     else renderAll();
     refresh();
     setInterval(() => { if (!document.hidden) refresh(); }, REFRESH_MS);
-    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
     }
   }
