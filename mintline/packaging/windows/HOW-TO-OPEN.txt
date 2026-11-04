@@ -1,0 +1,14 @@
+Mintline - how to open
+
+Double-click "Open Mintline.bat".
+Mintline opens in its own window (using Chrome if you have it,
+otherwise your default browser).
+
+Want an icon on your desktop?
+Right-click "Open Mintline.bat" > Show more options > Send to > Desktop (create shortcut).
+You can rename that shortcut to "Mintline".
+
+If Windows shows "Windows protected your PC", click "More info" then "Run anyway".
+It only opens index.html from this folder.
+
+Keep all the files in this folder together.

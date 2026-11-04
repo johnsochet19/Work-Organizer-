@@ -29,6 +29,7 @@
         <option value="btc">BTC</option>
       </select>
       <button id="refresh" class="icon-btn" aria-label="Refresh prices" title="Refresh">&#x21bb;</button>
+      <button id="open-settings" class="icon-btn" aria-label="Settings" title="Settings">&#x2699;</button>
     </div>
   </header>
 
@@ -37,6 +38,9 @@
     <button role="tab" data-tab="watchlist">Watchlist</button>
     <button role="tab" data-tab="portfolio">Portfolio</button>
     <button role="tab" data-tab="alerts">Alerts <span id="alert-badge" class="badge" hidden></span></button>
+    <button role="tab" data-tab="mentor">Mentor</button>
+    <button role="tab" data-tab="bitcoin">Bitcoin data</button>
+    <button role="tab" data-tab="backtest">Backtest</button>
   </nav>
 
   <main>
@@ -45,6 +49,10 @@
       <div id="global" class="global-strip"></div>
       <div class="toolbar">
         <input id="search" type="search" placeholder="Search coins…" autocomplete="off">
+        <div class="seg compact" role="radiogroup" aria-label="View">
+          <label><input type="radio" name="mview" value="prices" checked><span>Prices</span></label>
+          <label><input type="radio" name="mview" value="screener"><span>Screener</span></label>
+        </div>
         <select id="sort" aria-label="Sort by">
           <option value="rank">Rank</option>
           <option value="price">Price</option>
@@ -52,8 +60,9 @@
           <option value="change7d">7d %</option>
           <option value="volume">Volume</option>
         </select>
+        <button id="open-compare" class="btn ghost" hidden>Compare coins</button>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap" id="prices-wrap">
         <table class="coins">
           <thead>
             <tr>
@@ -70,6 +79,13 @@
           </thead>
           <tbody id="markets-body"></tbody>
         </table>
+      </div>
+      <div class="table-wrap" id="screener-wrap" hidden>
+        <table class="coins screener">
+          <thead id="screener-head"></thead>
+          <tbody id="screener-body"></tbody>
+        </table>
+        <p class="hint">Market cap ÷ FDV below 1 means more coins are still to be released. Volume ÷ market cap shows how actively a coin trades. Click a column to sort.</p>
       </div>
     </section>
 
@@ -98,6 +114,7 @@
 
     <!-- Portfolio -->
     <section id="tab-portfolio" class="panel">
+      <div id="pf-error" class="banner err" hidden></div>
       <div class="summary-cards">
         <div class="card"><div class="label">Total value</div><div id="pf-value" class="big">—</div></div>
         <div class="card"><div class="label">24h change</div><div id="pf-24h" class="big">—</div></div>
@@ -108,7 +125,16 @@
         <div class="card">
           <div class="card-head">
             <h2>Holdings</h2>
-            <button id="add-holding" class="btn">+ Add transaction</button>
+            <div class="row-gap">
+              <label class="inline-field">Cost method
+                <select id="tax-method" aria-label="Cost basis method">
+                  <option value="FIFO">FIFO (first in, first out)</option>
+                  <option value="LIFO">LIFO (last in, first out)</option>
+                  <option value="HIFO">HIFO (highest cost first)</option>
+                </select>
+              </label>
+              <button id="add-holding" class="btn">+ Add transaction</button>
+            </div>
           </div>
           <div class="table-wrap">
             <table class="holdings">
@@ -117,24 +143,60 @@
                   <th>Coin</th>
                   <th class="r">Price</th>
                   <th class="r">Holdings</th>
-                  <th class="r hide-sm">Avg buy</th>
-                  <th class="r">P / L</th>
-                  <th></th>
+                  <th class="r hide-sm">Avg cost</th>
+                  <th class="r">Unrealized P / L</th>
                 </tr>
               </thead>
               <tbody id="holdings-body"></tbody>
             </table>
           </div>
-          <p id="holdings-empty" class="empty" hidden>No holdings yet. Add a transaction to start tracking.</p>
+          <p id="holdings-empty" class="empty" hidden>No holdings yet. Add a transaction or import a trades CSV to start tracking.</p>
         </div>
         <div class="card">
           <h2>Allocation</h2>
           <div id="allocation"></div>
         </div>
       </div>
+
+      <div class="card section">
+        <div class="card-head">
+          <h2>Taxes <span class="muted small">(USD)</span></h2>
+          <div class="row-gap">
+            <select id="tax-year" aria-label="Tax year"></select>
+            <button id="export-8949" class="btn ghost">Download Form 8949 CSV</button>
+          </div>
+        </div>
+        <div id="tax-summary" class="stat-row"></div>
+        <div class="table-wrap">
+          <table class="holdings compact-table">
+            <thead><tr><th>Sold</th><th>Coin</th><th class="r">Quantity</th><th class="hide-sm">Acquired</th><th class="r">Proceeds</th><th class="r">Cost basis</th><th class="r">Gain / loss</th><th>Term</th></tr></thead>
+            <tbody id="realized-body"></tbody>
+          </table>
+        </div>
+        <p id="realized-empty" class="empty small" hidden>No sales in this year.</p>
+        <p class="hint" id="tax-note">Held more than 365 days counts as long term. This is a calculator, not tax advice. Have a CPA review it before you file.</p>
+      </div>
+
+      <div class="card section">
+        <div class="card-head">
+          <h2>Transactions</h2>
+          <div class="row-gap">
+            <label class="btn ghost">Import trades CSV<input id="import-trades" type="file" accept=".csv,text/csv" hidden></label>
+            <button id="export-trades" class="btn ghost">Export trades CSV</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="holdings compact-table">
+            <thead><tr><th>Date</th><th>Type</th><th>Coin</th><th class="r">Quantity</th><th class="r">Price</th><th class="r hide-sm">Fee</th><th class="hide-md">Exchange / notes</th><th></th></tr></thead>
+            <tbody id="tx-body"></tbody>
+          </table>
+        </div>
+        <p id="tx-empty" class="empty small" hidden>No transactions yet.</p>
+        <p class="hint">CSV columns: <code>date,type,asset,quantity,price_usd,fee_usd,exchange,notes</code> (same format as the Python toolkit). Types: buy, sell, income, gift_in, spend, transfer.</p>
+      </div>
       <div class="pf-actions">
-        <button id="export" class="btn ghost">Export data</button>
-        <label class="btn ghost">Import data<input id="import" type="file" accept="application/json" hidden></label>
+        <button id="export" class="btn ghost">Export backup</button>
+        <label class="btn ghost">Import backup<input id="import" type="file" accept="application/json" hidden></label>
       </div>
     </section>
 
@@ -142,21 +204,130 @@
     <section id="tab-alerts" class="panel">
       <div class="card">
         <div class="card-head">
-          <h2>Price alerts</h2>
+          <h2>Alerts</h2>
           <div class="row-gap">
             <button id="enable-notif" class="btn ghost">Enable notifications</button>
+            <label class="btn ghost">Import alerts.json<input id="import-rules" type="file" accept="application/json,.json" hidden></label>
+            <button id="export-rules" class="btn ghost">Export alerts.json</button>
+            <button id="check-alerts" class="btn ghost">Check now</button>
             <button id="add-alert" class="btn">+ New alert</button>
           </div>
         </div>
         <ul id="alerts-list" class="alerts"></ul>
-        <p id="alerts-empty" class="empty" hidden>No alerts. Create one to get notified when a coin crosses a price.</p>
+        <p id="alerts-empty" class="empty" hidden>No alerts. Create one, or import the alerts.json file from your Python toolkit.</p>
+        <p class="hint" id="alerts-hint">Alerts are checked every minute while Mintline is open. Each alert stays quiet for its cooldown after it fires. To get alerts on your phone, add an ntfy topic in Settings.</p>
+      </div>
+    </section>
+
+    <!-- Mentor -->
+    <section id="tab-mentor" class="panel">
+      <div class="mentor-grid">
+        <div class="card" id="mentor-briefing"><p class="empty">Loading your briefing…</p></div>
+        <div class="stack">
+          <div class="card">
+            <h2>About you</h2>
+            <form id="profile-form" class="profile-form">
+              <label class="check"><input type="checkbox" name="emergencyFund"> I have 3–6 months of living expenses saved in cash</label>
+              <label class="check"><input type="checkbox" name="highInterestDebt"> I carry credit-card or other high-interest debt</label>
+              <label class="field">Weekly amount I could invest without it hurting (USD)
+                <input name="weeklyUsd" type="number" min="0" step="any" required>
+              </label>
+              <label class="field">The most I'd ever put in, knowing I could lose it (USD)
+                <input name="maxTotalUsd" type="number" min="0" step="any" required>
+              </label>
+              <label class="field">Years I can leave it alone
+                <input name="years" type="number" min="0" step="any" required>
+              </label>
+              <label class="field">Risk level
+                <select name="risk">
+                  <option value="low">Low (100% BTC)</option>
+                  <option value="medium">Medium (70% BTC, 30% ETH)</option>
+                  <option value="high">High (60% BTC, 30% ETH, 10% SOL)</option>
+                </select>
+              </label>
+              <button type="submit" class="btn">Save and update briefing</button>
+            </form>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>How these rules did</h2><button id="mentor-backtest" class="btn ghost">Run backtest</button></div>
+            <div id="mentor-bt"><p class="muted small">Compares the mentor's adjusted weekly buying with plain weekly buying over the past year of Bitcoin prices.</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bitcoin data -->
+    <section id="tab-bitcoin" class="panel">
+      <div class="card-head page-head">
+        <p class="muted">Free replacements for Glassnode and CryptoQuant data. Sources: mempool.space, blockchain.info, Kraken Futures and alternative.me.</p>
+        <button id="reload-onchain" class="btn ghost">Reload</button>
+      </div>
+      <div class="onchain-grid">
+        <div class="card"><h2>Network right now</h2><div id="oc-network" class="stat-grid"></div></div>
+        <div class="card"><h2>Fear &amp; Greed</h2><div id="oc-fng"></div></div>
+      </div>
+      <div class="card section"><h2>Valuation (2 years, daily)</h2><div id="oc-valuation" class="metric-grid"></div>
+        <p class="hint">Mayer Multiple above 2.4 has historically meant overheated, below 1 cheap. NVT is market cap ÷ 90-day average on-chain volume. Puell is daily miner revenue ÷ its 365-day average. Hash ribbon "capitulation" means the 30-day hash rate average is below the 60-day average. MVRV, SOPR, realized cap and exchange flows need a full Bitcoin node and aren't included.</p>
+      </div>
+      <div class="card section"><h2>Futures (Kraken perpetuals)</h2>
+        <div class="table-wrap"><table class="holdings compact-table"><thead><tr><th>Contract</th><th class="r">Mark</th><th class="r hide-sm">Index</th><th class="r">Basis</th><th class="r hide-sm">Funding / hr</th><th class="r">Funding APR</th><th class="r">Open interest</th><th class="r hide-md">24h volume</th></tr></thead><tbody id="oc-deriv"></tbody></table></div>
+        <p class="hint">Positive funding means traders betting on rises are paying those betting on falls.</p>
+      </div>
+    </section>
+
+    <!-- Backtest -->
+    <section id="tab-backtest" class="panel">
+      <div class="bt-grid">
+        <div class="card">
+          <h2>Backtest a strategy</h2>
+          <form id="bt-form">
+            <label class="field">Strategy
+              <select name="strategy">
+                <option value="dca">DCA: buy a fixed amount on a schedule</option>
+                <option value="grid">Grid: buy each level down, sell one level up</option>
+                <option value="sma">SMA cross: hold while the fast average is above the slow one</option>
+              </select>
+            </label>
+            <label class="field">Coin <select name="coin"></select></label>
+            <div class="bt-params" data-for="dca">
+              <label class="field">Amount per buy (USD) <input name="amount" type="number" value="100" min="1" step="any"></label>
+              <label class="field">Every N days <input name="every" type="number" value="7" min="1" step="1"></label>
+              <label class="field">Buy double when this % below the 30-day high (0 = off) <input name="dip" type="number" value="0" min="0" step="any"></label>
+            </div>
+            <div class="bt-params" data-for="grid" hidden>
+              <label class="field">Lowest price (USD, blank = period low) <input name="low" type="number" min="0" step="any"></label>
+              <label class="field">Highest price (USD, blank = period high) <input name="high" type="number" min="0" step="any"></label>
+              <label class="field">Levels <input name="levels" type="number" value="20" min="2" step="1"></label>
+              <label class="field">Capital (USD) <input name="capital" type="number" value="5000" min="1" step="any"></label>
+            </div>
+            <div class="bt-params" data-for="sma" hidden>
+              <label class="field">Fast average (days) <input name="fast" type="number" value="50" min="2" step="1"></label>
+              <label class="field">Slow average (days) <input name="slow" type="number" value="200" min="3" step="1"></label>
+              <label class="field">Capital (USD) <input name="smacap" type="number" value="10000" min="1" step="any"></label>
+            </div>
+            <label class="field">Trading fee (%) <input name="fee" type="number" value="0.6" min="0" step="any"></label>
+            <button class="btn" type="submit">Run backtest</button>
+          </form>
+        </div>
+        <div class="card" id="bt-result"><p class="empty">Pick a strategy and run it to see how it would have done.</p></div>
+      </div>
+      <div class="card section">
+        <div class="card-head"><h2>Paper DCA bot</h2><span id="bot-status" class="pill">Off</span></div>
+        <p class="muted small">Simulated buying with a $10,000 pretend balance. It buys at the live price while Mintline is open. No real money is used. Live trading stays in the Python toolkit, so your exchange keys never go into the browser.</p>
+        <form id="bot-form" class="bot-form">
+          <label class="field">Coin <select name="coin"></select></label>
+          <label class="field">Amount (USD) <input name="amount" type="number" value="25" min="1" step="any"></label>
+          <label class="field">Every N hours <input name="hours" type="number" value="24" min="1" step="any"></label>
+          <div class="row-gap"><button class="btn" type="submit" id="bot-start">Start</button><button type="button" class="btn ghost" id="bot-stop">Stop</button><button type="button" class="btn danger" id="bot-reset">Reset</button></div>
+        </form>
+        <div id="bot-view"></div>
       </div>
     </section>
   </main>
 
   <footer class="foot">
     <span id="updated"></span>
-    <span>Data: <a href="https://www.coingecko.com" target="_blank" rel="noopener">CoinGecko</a></span>
+    <span>Data: <a href="https://www.coingecko.com" target="_blank" rel="noopener">CoinGecko</a> · Not financial advice</span>
   </footer>
 
   <!-- Coin detail -->
@@ -166,15 +337,34 @@
       <button class="icon-btn" data-close aria-label="Close">&times;</button>
     </div>
     <div id="detail-price" class="detail-price"></div>
-    <div class="ranges" id="ranges">
-      <button data-days="1">24H</button>
-      <button data-days="7" class="active">7D</button>
-      <button data-days="30">30D</button>
-      <button data-days="90">90D</button>
-      <button data-days="365">1Y</button>
+    <div class="chart-controls">
+      <div class="ranges" id="ranges">
+        <button data-days="1">24H</button>
+        <button data-days="7" class="active">7D</button>
+        <button data-days="30">30D</button>
+        <button data-days="90">90D</button>
+        <button data-days="365">1Y</button>
+      </div>
+      <div class="ranges" id="ind-toggles" aria-label="Indicators">
+        <button data-ind="sma50">SMA 50</button>
+        <button data-ind="sma200">SMA 200</button>
+        <button data-ind="bb">Bollinger</button>
+        <button data-ind="rsi">RSI</button>
+        <button data-ind="macd">MACD</button>
+      </div>
     </div>
+    <div id="chart-legend" class="chart-legend"></div>
     <div id="chart" class="chart"></div>
+    <div id="detail-ta" class="ta-notes"></div>
     <div id="detail-stats" class="stats"></div>
+    <details class="more" id="detail-exchanges-wrap">
+      <summary>Prices on exchanges</summary>
+      <div id="detail-exchanges"></div>
+    </details>
+    <details class="more" id="detail-research-wrap">
+      <summary>Research: supply, dilution, returns, developers</summary>
+      <div id="detail-research"></div>
+    </details>
     <div class="sheet-actions">
       <button id="detail-star" class="btn ghost"></button>
       <button id="detail-alert" class="btn ghost">Set alert</button>
@@ -182,27 +372,52 @@
     </div>
   </dialog>
 
-  <!-- Holding form -->
+  <!-- Transaction form -->
   <dialog id="holding-dialog" class="sheet small">
     <form id="holding-form" method="dialog">
       <div class="sheet-head">
         <h2>Add transaction</h2>
         <button type="button" class="icon-btn" data-close aria-label="Close">&times;</button>
       </div>
-      <div class="seg" role="radiogroup">
-        <label><input type="radio" name="type" value="buy" checked><span>Buy</span></label>
-        <label><input type="radio" name="type" value="sell"><span>Sell</span></label>
-      </div>
+      <label class="field">Type
+        <select name="type">
+          <option value="buy">Buy</option>
+          <option value="sell">Sell</option>
+          <option value="income">Income (staking, airdrop, mining)</option>
+          <option value="gift_in">Gift received</option>
+          <option value="spend">Spend (paid for something)</option>
+          <option value="transfer">Transfer between my wallets (not taxable)</option>
+        </select>
+      </label>
       <label class="field">Coin
         <select name="coin" required></select>
       </label>
-      <label class="field">Quantity
-        <input name="amount" type="number" step="any" min="0" required placeholder="0.00">
-      </label>
-      <label class="field">Price per coin (<span class="cur-label"></span>)
-        <input name="price" type="number" step="any" min="0" required>
-      </label>
+      <div class="two-col">
+        <label class="field">Date
+          <input name="date" type="date" required>
+        </label>
+        <label class="field">Quantity
+          <input name="amount" type="number" step="any" min="0" required placeholder="0.00">
+        </label>
+      </div>
+      <div class="two-col">
+        <label class="field">Price per coin (<span class="cur-label"></span>)
+          <input name="price" type="number" step="any" min="0" required>
+        </label>
+        <label class="field">Fee (<span class="cur-label"></span>)
+          <input name="fee" type="number" step="any" min="0" value="0">
+        </label>
+      </div>
+      <div class="two-col">
+        <label class="field">Exchange or wallet
+          <input name="exchange" type="text" maxlength="60" placeholder="coinbase">
+        </label>
+        <label class="field">Notes
+          <input name="notes" type="text" maxlength="120">
+        </label>
+      </div>
       <div class="field total">Total: <strong id="tx-total">—</strong></div>
+      <p class="hint err-text" id="tx-error" hidden></p>
       <div class="sheet-actions">
         <button type="button" class="btn ghost" data-close>Cancel</button>
         <button type="submit" class="btn">Save</button>
@@ -214,21 +429,62 @@
   <dialog id="alert-dialog" class="sheet small">
     <form id="alert-form" method="dialog">
       <div class="sheet-head">
-        <h2>New price alert</h2>
+        <h2>New alert</h2>
         <button type="button" class="icon-btn" data-close aria-label="Close">&times;</button>
       </div>
-      <label class="field">Coin
-        <select name="coin" required></select>
+      <label class="field">Alert when
+        <select name="type">
+          <optgroup label="Price">
+            <option value="price_above">Price goes above</option>
+            <option value="price_below">Price goes below</option>
+            <option value="change_24h_above">24h change is above (%)</option>
+            <option value="change_24h_below">24h change is below (%)</option>
+          </optgroup>
+          <optgroup label="Indicators">
+            <option value="rsi_above">RSI is above</option>
+            <option value="rsi_below">RSI is below</option>
+            <option value="cross_above_sma">Price crosses above its moving average</option>
+            <option value="cross_below_sma">Price crosses below its moving average</option>
+          </optgroup>
+          <optgroup label="Market">
+            <option value="fear_greed_above">Fear &amp; Greed is above</option>
+            <option value="fear_greed_below">Fear &amp; Greed is below</option>
+            <option value="funding_apr_above">Futures funding is above (% per year)</option>
+          </optgroup>
+        </select>
       </label>
-      <div class="field">Notify me when price goes
-        <div class="seg">
-          <label><input type="radio" name="dir" value="above" checked><span>Above</span></label>
-          <label><input type="radio" name="dir" value="below"><span>Below</span></label>
-        </div>
+      <label class="field" data-show="coin">Coin
+        <select name="coin"></select>
+      </label>
+      <label class="field" data-show="contract">Futures contract
+        <input name="contract" type="text" value="PF_XBTUSD">
+      </label>
+      <label class="field" data-show="value"><span id="value-label">Value</span>
+        <input name="value" type="number" step="any">
+      </label>
+      <div class="two-col" data-show="ind">
+        <label class="field">Candles
+          <select name="interval">
+            <option value="5m">5 minutes</option>
+            <option value="15m">15 minutes</option>
+            <option value="1h">1 hour</option>
+            <option value="4h">4 hours</option>
+            <option value="6h">6 hours</option>
+            <option value="1d">1 day</option>
+          </select>
+        </label>
+        <label class="field">Period
+          <input name="period" type="number" min="2" step="1">
+        </label>
       </div>
-      <label class="field">Target price (<span class="cur-label"></span>)
-        <input name="price" type="number" step="any" min="0" required>
-      </label>
+      <div class="two-col">
+        <label class="field">Quiet after firing (minutes)
+          <input name="cooldown" type="number" min="1" step="1" value="60">
+        </label>
+        <label class="field">Name (optional)
+          <input name="name" type="text" maxlength="60">
+        </label>
+      </div>
       <p class="hint" id="alert-hint"></p>
       <div class="sheet-actions">
         <button type="button" class="btn ghost" data-close>Cancel</button>
@@ -237,8 +493,47 @@
     </form>
   </dialog>
 
+  <!-- Settings -->
+  <dialog id="settings-dialog" class="sheet small">
+    <form id="settings-form" method="dialog">
+      <div class="sheet-head">
+        <h2>Settings</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Close">&times;</button>
+      </div>
+      <label class="field">CoinGecko demo API key (optional)
+        <input name="cgKey" type="text" autocomplete="off" spellcheck="false" placeholder="CG-…">
+        <span class="hint">Free at coingecko.com/en/developers/dashboard. It raises the request limit. It's kept only in this browser.</span>
+      </label>
+      <label class="field">ntfy topic for phone alerts (optional)
+        <input name="ntfyTopic" type="text" autocomplete="off" spellcheck="false" placeholder="john-crypto-8f3k2q">
+        <span class="hint">Install the free ntfy app, subscribe to a long random topic name, and enter it here.</span>
+      </label>
+      <label class="field">Slack or Discord webhook URL (optional)
+        <input name="webhook" type="url" autocomplete="off" spellcheck="false" placeholder="https://discord.com/api/webhooks/…">
+      </label>
+      <p class="hint">Email alerts need a mail server, so they're only available in the Python toolkit.</p>
+      <div class="sheet-actions">
+        <button type="button" class="btn ghost" id="test-notify">Send test alert</button>
+        <button type="submit" class="btn">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Compare -->
+  <dialog id="compare-dialog" class="sheet">
+    <div class="sheet-head">
+      <h2>Compare coins</h2>
+      <button type="button" class="icon-btn" data-close aria-label="Close">&times;</button>
+    </div>
+    <div class="compare-pickers" id="compare-pickers"></div>
+    <div class="table-wrap"><table class="holdings compact-table" id="compare-table"></table></div>
+  </dialog>
+
   <div id="toasts" class="toasts" aria-live="polite"></div>
 
+  <script src="indicators.js"></script>
+  <script src="engine.js"></script>
   <script src="app.js"></script>
+  <script src="tools.js"></script>
 </body>
 </html>

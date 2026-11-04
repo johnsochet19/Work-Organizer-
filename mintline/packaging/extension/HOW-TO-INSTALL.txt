@@ -1,0 +1,11 @@
+Mintline Chrome extension - install steps
+
+1. Extract this ZIP to a folder you'll keep (e.g. Documents\Mintline-extension).
+2. In Chrome, go to  chrome://extensions
+3. Turn on "Developer mode" (top-right switch).
+4. Click "Load unpacked" and choose the extracted Mintline-extension folder
+   (the one that contains manifest.json).
+5. Click the puzzle-piece icon in Chrome's toolbar and pin Mintline.
+   Clicking the Mintline icon opens the tracker in its own tab.
+
+Don't delete or move the folder afterwards - Chrome loads the extension from it.

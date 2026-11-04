@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Mintline - Crypto Tracker",
+  "short_name": "Mintline",
+  "version": "2.0.0",
+  "description": "Live crypto prices, alerts, portfolio and tax tracking, research, on-chain data and backtests.",
+  "icons": { "16": "icons/icon-192.png", "48": "icons/icon-192.png", "128": "icons/icon-192.png" },
+  "action": { "default_title": "Open Mintline", "default_icon": "icons/icon-192.png" },
+  "background": { "service_worker": "background.js" },
+  "permissions": ["notifications"],
+  "host_permissions": [
+    "https://api.coingecko.com/*",
+    "https://coin-images.coingecko.com/*",
+    "https://assets.coingecko.com/*",
+    "https://api.alternative.me/*",
+    "https://api.kraken.com/*",
+    "https://futures.kraken.com/*",
+    "https://api.exchange.coinbase.com/*",
+    "https://api.binance.us/*",
+    "https://mempool.space/*",
+    "https://api.blockchain.info/*",
+    "https://ntfy.sh/*",
+    "https://discord.com/*",
+    "https://hooks.slack.com/*"
+  ]
+}

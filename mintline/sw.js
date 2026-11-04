@@ -1,10 +1,13 @@
 // Mintline service worker: offline app shell + network-first API caching.
-const VERSION = 'mintline-v1';
+const VERSION = 'mintline-v2';
 const SHELL = [
   './',
   'index.html',
   'styles.css',
+  'indicators.js',
+  'engine.js',
   'app.js',
+  'tools.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',
