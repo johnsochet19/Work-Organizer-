@@ -190,22 +190,10 @@ print(quote("reports/2026 Q4", safe=""))         # reports%2F2026%20Q4
 print(urljoin("https://api.example.com/v1/items", "/v1/items?page=2"))
 ```
 
-Look up an IP address yourself:
-
-```python
-import socket
-
-for family, _, _, _, address in socket.getaddrinfo("api.github.com", 443, proto=socket.IPPROTO_TCP):
-    print(family.name, address[0])
-```
-
-From the terminal:
+Look up an IP address yourself from the terminal (in Python: `socket.getaddrinfo("api.github.com", 443)`):
 
 ```bash
 nslookup api.github.com
-```
-```bash
-dig +short api.open-meteo.com
 ```
 
 **Common mistakes**
@@ -323,25 +311,10 @@ with httpx.Client(event_hooks={"request": [log_request], "response": [log_respon
     print(r.json()["full_name"])
 ```
 
-Different ways to send a body, and what `Content-Type` each produces:
-
-```python
-import httpx
-
-with httpx.Client(base_url="https://httpbin.org", timeout=10) as client:
-    # JSON body -> Content-Type: application/json
-    print(client.post("/post", json={"title": "gym"}).json()["json"])
-
-    # Form body -> Content-Type: application/x-www-form-urlencoded (classic HTML forms, OAuth token calls)
-    print(client.post("/post", data={"title": "gym"}).json()["form"])
-
-    # File upload -> Content-Type: multipart/form-data
-    files = {"file": ("notes.txt", b"hello file", "text/plain")}
-    print(client.post("/post", files=files).json()["files"])
-
-    # Raw bytes -> you choose the Content-Type
-    print(client.post("/post", content=b"<task/>", headers={"Content-Type": "application/xml"}).status_code)
-```
+Ways to send a body, and the `Content-Type` each produces: `json={...}` → `application/json`;
+`data={...}` → `application/x-www-form-urlencoded` (HTML forms, OAuth token endpoints); `files={...}` →
+`multipart/form-data` (uploads); `content=b"..."` → raw bytes with whatever `Content-Type` header you set.
+Try each against `https://httpbin.org/post`, which echoes back what it received.
 
 **Common mistakes**
 - Calling `.json()` on a `204` response or on an HTML error page from a proxy. Check `response.status_code` and `response.headers.get("content-type")` first.
@@ -538,12 +511,9 @@ Basic GET (`-s` silences the progress bar):
 ```bash
 curl -s "https://api.github.com/repos/python/cpython"
 ```
-Show response headers too (`-i`), or the full conversation including TLS and request headers (`-v`):
+Show response headers too (`-i`); use `-v` instead to see the full conversation including TLS and request headers:
 ```bash
 curl -i "https://api.github.com/repos/python/cpython"
-```
-```bash
-curl -v "https://api.open-meteo.com/v1/forecast?latitude=51.5&longitude=-0.12&current=temperature_2m"
 ```
 Send headers (`-H`):
 ```bash
@@ -553,10 +523,6 @@ Send JSON (`--json` sets the method to POST and both JSON headers; needs curl 7.
 ```bash
 curl -s --json '{"title": "gym", "priority": 2}' "https://httpbin.org/post"
 ```
-Older curl equivalent:
-```bash
-curl -s -X POST -H "Content-Type: application/json" -d '{"title": "gym"}' "https://httpbin.org/post"
-```
 Use a token from an environment variable (never paste the token itself into a command you'll save or share):
 ```bash
 curl -s -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/user"
@@ -564,9 +530,6 @@ curl -s -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/user"
 Pipe into **jq** to extract fields:
 ```bash
 curl -s "https://api.github.com/repos/python/cpython" | jq '.stargazers_count'
-```
-```bash
-curl -s "https://api.github.com/users/python/repos?per_page=5" | jq '.[] | {name, stars: .stargazers_count}'
 ```
 
 **HTTPie**
@@ -765,19 +728,8 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-**Streaming large downloads** without loading them into memory:
-
-```python
-import httpx
-
-url = "https://www.python.org/ftp/python/3.13.0/Python-3.13.0.tgz"
-with httpx.Client(timeout=30, follow_redirects=True) as client:
-    with client.stream("GET", url) as r:
-        r.raise_for_status()
-        with open("python.tgz", "wb") as f:
-            for chunk in r.iter_bytes(chunk_size=65536):
-                f.write(chunk)
-```
+For large downloads, `client.stream("GET", url)` with `response.iter_bytes()` lets you write a file chunk by
+chunk instead of loading it all into memory.
 
 **Common mistakes**
 - Creating a new `Client` inside a loop or inside every function call. Create it once and pass it around (or keep it on a class).
@@ -851,6 +803,8 @@ def parse_retry_after(value: str | None) -> float | None:
         when = parsedate_to_datetime(value)         # "Wed, 04 Nov 2026 09:30:00 GMT"
     except (TypeError, ValueError):
         return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
     return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
 
 
@@ -931,26 +885,11 @@ with httpx.Client(timeout=10) as client:
 
 tenacity works with `async def` functions too: decorate them the same way and it uses `asyncio.sleep`.
 
-**Transport-level retries.** httpx can retry *connection failures only* (not status codes) for you:
+**Transport-level retries.** `httpx.Client(transport=httpx.HTTPTransport(retries=3))` retries *connection
+failures only* (never status codes). Handy, but it doesn't replace the logic above.
 
-```python
-transport = httpx.HTTPTransport(retries=3)        # httpx.AsyncHTTPTransport for async
-client = httpx.Client(transport=transport, timeout=10)
-```
-
-**Reading rate-limit headers to slow down early**
-
-```python
-import time
-
-import httpx
-
-with httpx.Client(base_url="https://api.github.com", timeout=10) as client:
-    r = client.get("/rate_limit")              # this endpoint doesn't count against your limit
-    core = r.json()["resources"]["core"]
-    reset_in = core["reset"] - time.time()
-    print(f"{core['remaining']}/{core['limit']} left, resets in {reset_in / 60:.0f} min")
-```
+**Slow down early.** Check `x-ratelimit-remaining` on each response (or call GitHub's `/rate_limit` endpoint,
+which doesn't count against your limit) and pause *before* you hit zero.
 
 **Common mistakes**
 - Retrying 400/401/404. They will fail again; you just waste quota and time.
@@ -1016,24 +955,9 @@ repos = search_repos("topic:todo language:python", max_results=150)
 print(len(repos), repos[0]["full_name"])
 ```
 
-**Code: offset with a `next` URL (PokeAPI)**
-
-```python
-import httpx
-
-url: str | None = "https://pokeapi.co/api/v2/pokemon"
-params: dict | None = {"limit": 100, "offset": 0}
-names: list[str] = []
-with httpx.Client(timeout=10) as client:
-    while url and len(names) < 300:
-        r = client.get(url, params=params)
-        r.raise_for_status()
-        data = r.json()                 # {"count": ..., "next": "...", "previous": ..., "results": [...]}
-        names += [p["name"] for p in data["results"]]
-        url = data["next"]              # already contains limit & offset
-        params = None                   # so don't send ours again
-print(len(names), names[:5])
-```
+**Offset with a `next` URL** works the same way. PokeAPI (`https://pokeapi.co/api/v2/pokemon?limit=100&offset=0`)
+returns `{"count": ..., "next": "<url>", "results": [...]}`: keep requesting `data["next"]` until it's `null`, and
+don't re-send your own `params` with it, because the `next` URL already contains `limit` and `offset`.
 
 **Code: Link headers (GitHub REST), as a generator**
 
@@ -1104,24 +1028,8 @@ def paginate_cursor(
 # for row in paginate_cursor(fetch): ...
 ```
 
-**Async pagination** uses an `async def` generator and `async for`:
-
-```python
-import httpx
-
-
-async def paginate_async(client: httpx.AsyncClient, url: str, params: dict | None = None):
-    next_url: str | None = url
-    while next_url:
-        r = await client.get(next_url, params=params)
-        r.raise_for_status()
-        for item in r.json():
-            yield item
-        next_url = r.links.get("next", {}).get("url")
-        params = None
-
-# async for repo in paginate_async(client, "/users/python/repos", {"per_page": 100}): ...
-```
+**Async pagination** works the same way: write `async def paginate_async(...)` with `await client.get(...)`
+and `yield item` inside, and consume it with `async for item in paginate_async(...)`.
 
 **Common mistakes**
 - Only reading page 1.
@@ -1230,20 +1138,8 @@ print(datetime.fromisoformat("2026-11-04T09:30:00Z"))         # 2026-11-04 09:30
 ```
 
 **JSON Lines** (`.jsonl`): one JSON object per line. Great for logs and large datasets because you can append
-and stream line by line. AI providers use it for batch jobs and fine-tuning data.
-
-```python
-import json
-from pathlib import Path
-
-path = Path("events.jsonl")
-with path.open("a", encoding="utf-8") as f:
-    f.write(json.dumps({"event": "task_added", "title": "gym"}) + "\n")
-
-with path.open(encoding="utf-8") as f:
-    events = [json.loads(line) for line in f if line.strip()]
-print(events)
-```
+with `f.write(json.dumps(event) + "\n")` and read line by line with `json.loads(line)`. AI providers use it for
+batch jobs and fine-tuning data.
 
 **Common mistakes**
 - `json.dumps(datetime.now())` → `TypeError: Object of type datetime is not JSON serializable`. Use `default=` or Pydantic.
@@ -1254,7 +1150,7 @@ print(events)
 **Exercises**
 1. Extend `to_jsonable` to handle `pathlib.Path` and `bytes` (as base64 text with `base64.b64encode(b).decode()`).
 2. Write `from_jsonable(d: dict) -> dict` that converts any string value matching `YYYY-MM-DD` back to a `date`. (Then appreciate why Pydantic exists.)
-3. Write 1,000 fake events to a `.jsonl` file and count events by type while reading it line by line.
+3. Write 1,000 fake events (`{"event": "task_added" | "task_done", ...}`) to a `.jsonl` file and count events by type while reading it line by line.
 
 **Check yourself**
 - Name four Python types JSON can't represent directly.
@@ -1327,24 +1223,9 @@ also exists; it raises on the first error.)
 Note: `format` is only an annotation by default. To actually check dates and emails, pass a format checker:
 `Draft202012Validator(TASK_SCHEMA, format_checker=Draft202012Validator.FORMAT_CHECKER)`.
 
-**You rarely write schemas by hand in Python.** Pydantic generates them from your models (Section 1 showed
-`model_json_schema()`). Write the model, get the schema for free, and you have one source of truth:
-
-```python
-import json
-
-from pydantic import BaseModel, Field
-
-
-class AddTaskInput(BaseModel):
-    """Add a task to the user's to-do list."""
-
-    title: str = Field(min_length=1, description="What needs doing")
-    priority: int = Field(3, ge=1, le=3, description="1 = high, 3 = low")
-
-
-print(json.dumps(AddTaskInput.model_json_schema(), indent=2))
-```
+**You rarely write schemas by hand in Python.** Pydantic generates them from your models with
+`Model.model_json_schema()` (Section 1, Lesson 22), and `Field(description=...)` text ends up in the schema's
+`description`. Write the model, get the schema for free, and you have one source of truth.
 
 **Common mistakes**
 - Forgetting `"additionalProperties": false`, so typos like `"titel"` pass validation silently.
@@ -1449,39 +1330,9 @@ except ValidationError as e:
 # ('pushed_at',) -> Input should be a valid datetime or date, input is too short
 ```
 
-**Code: enums and reshaping input**
-
-```python
-from enum import StrEnum
-from typing import Any
-
-from pydantic import BaseModel, model_validator
-
-
-class IssueState(StrEnum):
-    OPEN = "open"
-    CLOSED = "closed"
-
-
-class Issue(BaseModel):
-    number: int
-    title: str
-    state: IssueState
-    is_pull_request: bool = False
-
-    @model_validator(mode="before")
-    @classmethod
-    def mark_pull_requests(cls, data: Any) -> Any:
-        # GitHub's issues endpoint also returns PRs; they have a "pull_request" key.
-        if isinstance(data, dict) and "pull_request" in data:
-            data = {**data, "is_pull_request": True}
-        return data
-
-
-i = Issue.model_validate({"number": 5, "title": "Fix", "state": "open", "pull_request": {}})
-print(i.state is IssueState.OPEN, i.is_pull_request, i.model_dump(mode="json"))
-# True True {'number': 5, 'title': 'Fix', 'state': 'open', 'is_pull_request': True}
-```
+**Enums and reshaping input.** A field typed as a `StrEnum` (e.g. `state: IssueState` with `OPEN = "open"`)
+accepts only known values and gives you a real enum. A `@model_validator(mode="before")` sees the raw dict before
+fields are validated, so it can reshape it; the capstone uses one to flag GitHub issues that are really pull requests.
 
 **Code: discriminated unions** (you'll use this to parse AI responses, which mix block types)
 
@@ -2104,23 +1955,10 @@ if settings.github_token:
 Real environment variables override `.env` values, so the same code works locally (`.env`) and in production
 (variables injected by a secret manager or `op run --env-file=.env -- python app.py`).
 
-**Code: cloud secret managers** (each needs the provider's SDK and credentials configured; shown so you recognise them)
-
-```python
-# Google Secret Manager:  pip install google-cloud-secret-manager
-from google.cloud import secretmanager
-
-client = secretmanager.SecretManagerServiceClient()
-name = "projects/my-project/secrets/github-token/versions/latest"
-token = client.access_secret_version(request={"name": name}).payload.data.decode("utf-8")
-```
-
-```python
-# AWS Secrets Manager:  pip install boto3
-import boto3
-
-token = boto3.client("secretsmanager").get_secret_value(SecretId="work-organizer/github-token")["SecretString"]
-```
+**Cloud secret managers** all work the same way: your code (running with an identity the cloud trusts) asks
+for a secret by name at startup. For example, with `boto3`:
+`boto3.client("secretsmanager").get_secret_value(SecretId="work-organizer/github-token")["SecretString"]`.
+Google's `google-cloud-secret-manager` and Azure's `azure-keyvault-secrets` packages are equivalent.
 
 **Common mistakes**
 - Moving secrets into a "config.py" that gets committed.
@@ -2428,33 +2266,10 @@ for _ in range(3):
 (For httpx, the `hishel` library plays the same role. In the capstone you'll write your own small cache instead,
 so you understand exactly what's happening.)
 
-**Option 2: a simple disk cache.** Cache the *parsed JSON* under a key built from the URL and parameters, with a
-time-to-live (TTL):
-
-```python
-import hashlib
-import json
-import time
-from pathlib import Path
-
-
-def cache_key(url: str, params: dict) -> str:
-    raw = json.dumps({"url": url, "params": params}, sort_keys=True)   # sort_keys: same params, same key
-    return hashlib.sha256(raw.encode()).hexdigest()
-
-
-def cached_get_json(client, url: str, params: dict, ttl: float = 600, folder: Path = Path(".cache")):
-    path = folder / f"{cache_key(url, params)}.json"
-    if path.exists():
-        entry = json.loads(path.read_text(encoding="utf-8"))
-        if time.time() - entry["stored_at"] < ttl:
-            return entry["data"]                                         # fresh: no request
-    r = client.get(url, params=params)
-    r.raise_for_status()
-    folder.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"stored_at": time.time(), "data": r.json()}), encoding="utf-8")
-    return r.json()
-```
+**Option 2: your own disk cache.** Store the *parsed JSON* in a file named after a hash of the URL and
+parameters (`hashlib.sha256(json.dumps({...}, sort_keys=True).encode()).hexdigest()`), together with the time it
+was stored. On the next call, if the file exists and is younger than the time-to-live (TTL), return it without a
+request. You'll build exactly this (`DiskCache`) in the capstone.
 
 **What (not) to cache**
 
@@ -2475,8 +2290,8 @@ For in-memory caching of pure functions within one run, `functools.lru_cache` or
 
 **Exercises**
 1. Run the `requests-cache` example, delete `http_cache.sqlite`, and run it again. Then use `urls_expire_after={"*.open-meteo.com": 900}` to set per-host expiry.
-2. Add a `use_cache: bool = True` parameter to `cached_get_json` and a `clear_cache()` function.
-3. Make `cached_get_json` write atomically (write to a `.tmp` file then `Path.replace`), and explain why that matters if two processes run at once.
+2. Use `If-None-Match` to poll a GitHub repo every 30 seconds for 5 minutes and count how many responses were 304.
+3. Explain why the capstone's `DiskCache.set` writes to a `.tmp` file and then calls `Path.replace`, rather than writing the final file directly.
 
 **Check yourself**
 - What does an `ETag` let you do?
@@ -3183,13 +2998,6 @@ def test_gives_up_after_max_retries(weather):
 
 
 @respx.mock
-def test_network_errors_are_retried(weather):
-    respx.get(GEOCODING_URL).mock(
-        side_effect=[httpx.ConnectTimeout("slow"), httpx.Response(200, json=BERLIN)])
-    assert weather.geocode("Berlin").name == "Berlin"
-
-
-@respx.mock
 def test_second_call_is_served_from_cache(weather):
     route = respx.get(GEOCODING_URL).mock(return_value=httpx.Response(200, json=BERLIN))
     weather.geocode("Berlin")
@@ -3203,7 +3011,7 @@ import httpx
 import pytest
 import respx
 
-from apis.errors import ApiError, NotFoundError, RateLimitedError
+from apis.errors import ApiError, RateLimitedError
 
 API = "https://api.github.com"
 
@@ -3257,13 +3065,6 @@ def test_pull_requests_filtered_out(github):
 
 
 @respx.mock
-def test_missing_user_raises_not_found(github):
-    respx.get(f"{API}/users/ghost-xyz/repos").mock(return_value=httpx.Response(404))
-    with pytest.raises(NotFoundError):
-        github.list_user_repos("ghost-xyz")
-
-
-@respx.mock
 def test_exhausted_rate_limit_raises(github):
     respx.get(f"{API}/users/octocat/repos").mock(return_value=httpx.Response(
         403, headers={"x-ratelimit-remaining": "0", "x-ratelimit-reset": "0"}))
@@ -3279,8 +3080,9 @@ def test_post_is_never_retried(github):
     assert route.call_count == 1
 ```
 
-Write `tests/test_http.py` yourself: `parse_retry_after` with seconds, an HTTP date, `None` and garbage; the
-cache expiring after its TTL (pass a fake `clock`); and cache keys ignoring parameter order.
+That's 13 tests. Write the rest yourself to reach Level 3: a `ConnectTimeout` followed by a 200 succeeds; a 404
+from GitHub raises `NotFoundError`; and `tests/test_http.py` covering `parse_retry_after` (seconds, an HTTP date,
+`None`, garbage), the cache expiring after its TTL (pass a fake `clock`), and cache keys ignoring parameter order.
 
 Run everything:
 
@@ -3411,15 +3213,6 @@ def check_github_budget(response: httpx.Response) -> None:
 # Call check_github_budget(response) in get_with_retries right after each response arrives.
 ```
 
-**Lesson 8, Exercise 1**
-```python
-import httpx
-
-with httpx.Client(base_url="https://api.github.com", timeout=10) as client:
-    items = paginate(client, "/repos/psf/requests/issues", {"state": "open", "per_page": 100})
-    print(sum(1 for item in items if "pull_request" not in item))
-```
-
 **Lesson 8, Exercise 3**
 ```python
 def fake_fetch(cursor: str | None) -> dict:
@@ -3533,21 +3326,26 @@ def test_404_not_retried():
 
 **Capstone: the `request()` retry loop**
 ```python
-for attempt in range(retries + 1):
-    is_last = attempt == retries
-    try:
-        response = self._client.request(method, url, **kwargs)
-    except httpx.TransportError as exc:
-        if is_last:
-            raise ApiError(f"Network error calling {url}: {exc}") from exc
-        self._sleep(self._backoff(attempt))
-        continue
-    if response.status_code in RETRYABLE_STATUS and not is_last:
-        wait = parse_retry_after(response.headers.get("Retry-After"))
-        self._sleep(wait if wait is not None else self._backoff(attempt))
-        continue
-    self._raise_for_status(response)
-    return response
+def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+    """Send a request, retrying transient failures for idempotent methods."""
+    method = method.upper()
+    retries = self.max_retries if method in IDEMPOTENT_METHODS else 0
+    for attempt in range(retries + 1):
+        is_last = attempt == retries
+        try:
+            response = self._client.request(method, url, **kwargs)
+        except httpx.TransportError as exc:
+            if is_last:
+                raise ApiError(f"Network error calling {url}: {exc}") from exc
+            self._sleep(self._backoff(attempt))
+            continue
+        if response.status_code in RETRYABLE_STATUS and not is_last:
+            wait = parse_retry_after(response.headers.get("Retry-After"))
+            self._sleep(wait if wait is not None else self._backoff(attempt))
+            continue
+        self._raise_for_status(response)
+        return response
+    raise AssertionError("unreachable")
 ```
 
 ---

@@ -2257,4 +2257,4 @@ asyncio.run(main())   # takes ~2s, not 4.5s
 | learngitbranching.js.org | Interactive | Understanding branches visually |
 | javascript.info | Tutorial | JavaScript (Part C) |
 
-**Next:** Section 2 — Working with Data and APIs (HTTP in depth, OAuth, and your first AI model call).
+**Next:** [Section 2 — Working with Data and APIs](02-data-and-apis.md) (HTTP in depth, pagination, OAuth, webhooks and caching).
