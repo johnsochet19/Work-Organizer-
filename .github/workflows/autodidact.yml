@@ -1,0 +1,94 @@
+# Runs the Autodidact research agent on GitHub's servers, every hour, for free.
+# Its brain is saved to the `autodidact-brain` branch, together with a readable
+# knowledge.md report, so each run continues where the last one stopped.
+#
+# To steer it: Actions tab -> "Autodidact" -> "Run workflow" -> type a topic.
+name: Autodidact
+
+on:
+  schedule:
+    - cron: "17 * * * *"   # every hour
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: "Something to research now (leave blank to let it choose)"
+        required: false
+        default: ""
+      cycles:
+        description: "How many research cycles to run"
+        required: false
+        default: "15"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: autodidact
+  cancel-in-progress: false
+
+env:
+  # Its long-term interest when it starts with an empty brain.
+  MISSION: "artificial intelligence"
+  BRAIN_BRANCH: autodidact-brain
+
+jobs:
+  learn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Load the brain from the last run
+        run: |
+          mkdir -p brain
+          if git ls-remote --exit-code --heads origin "$BRAIN_BRANCH" >/dev/null; then
+            git fetch --depth=1 origin "$BRAIN_BRANCH"
+            git archive "origin/$BRAIN_BRANCH" | tar -x -C brain
+            echo "Loaded existing brain."
+          else
+            echo "No brain yet: starting fresh with the mission '$MISSION'."
+          fi
+
+      - name: Research
+        working-directory: autodidact
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TOPIC: ${{ github.event.inputs.topic }}
+          CYCLES: ${{ github.event.inputs.cycles || '15' }}
+        run: |
+          HOME_DIR="$GITHUB_WORKSPACE/brain"
+          if [ -n "$TOPIC" ]; then
+            python -m autodidact --home "$HOME_DIR" learn "$TOPIC" --cycles "$CYCLES"
+          elif [ ! -f "$HOME_DIR/brain.db" ]; then
+            python -m autodidact --home "$HOME_DIR" learn "$MISSION" --mission --cycles "$CYCLES"
+          else
+            python -m autodidact --home "$HOME_DIR" run --cycles "$CYCLES"
+          fi
+          python -m autodidact --home "$HOME_DIR" report -o "$HOME_DIR/knowledge.md"
+          python -m autodidact --home "$HOME_DIR" status
+
+      - name: Save the brain
+        working-directory: brain
+        run: |
+          rm -rf cache
+          cat > README.md <<'MD'
+          # Autodidact's brain
+
+          This branch is written automatically by the Autodidact workflow every hour.
+
+          - **[knowledge.md](knowledge.md)**: everything it has learned so far, in plain text.
+          - `brain.db`: its full memory (SQLite). Download it and run
+            `python -m autodidact --home <folder> ask "your question"` to ask it questions.
+          MD
+          git init -q
+          git checkout -q -b "$BRAIN_BRANCH"
+          git config user.name "autodidact-bot"
+          git config user.email "autodidact-bot@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Brain after run ${{ github.run_number }}"
+          git push -f -q "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "$BRAIN_BRANCH"
+          echo "Saved. Read what it knows: https://github.com/${{ github.repository }}/blob/$BRAIN_BRANCH/knowledge.md"

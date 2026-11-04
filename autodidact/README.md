@@ -3,6 +3,18 @@
 Autodidact is a research agent that builds its own "brain" from free sources on the web, and builds its own toolset by finding new free APIs and learning how to use them.
 It runs on plain Python 3.10+ with **no installs and no keys required**.
 
+## It runs by itself on GitHub
+
+Once this is merged, GitHub's servers run Autodidact **every hour, for free**. You don't need to install anything.
+
+- **See what it has learned:** open `knowledge.md` on the [`autodidact-brain` branch](../../../blob/autodidact-brain/knowledge.md). It updates after every run.
+- **Watch it work:** go to the repo's **Actions** tab and click **Autodidact**.
+- **Point it at a subject:** on the Actions tab, click **Autodidact**, then **Run workflow**, type a topic, and click the green **Run workflow** button.
+- **Change its long-term interest:** edit `MISSION` in `.github/workflows/autodidact.yml`. The default is "artificial intelligence".
+- **Optional, for written answers:** add a repo secret named `ANTHROPIC_API_KEY` under Settings → Secrets and variables → Actions.
+
+## Running it on your own computer
+
 ```bash
 cd autodidact
 python -m autodidact learn "how vaccines work" --cycles 10   # give it a starting interest
