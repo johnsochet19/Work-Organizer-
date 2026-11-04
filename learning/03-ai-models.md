@@ -330,33 +330,7 @@ def text_of(response) -> str:
 
 **Why `max_tokens=16000`?** It's a ceiling, not a target. You pay only for tokens actually generated, and thinking counts toward this limit, so a small number can cut the model off mid-thought. Use around 16000 for normal (non-streaming) requests; go lower only when you deliberately want short output.
 
-**The async client** (Section 1, Lesson 23) has the same methods, awaited:
-```python
-import asyncio
-import anthropic
-from dotenv import load_dotenv
-
-load_dotenv()
-
-async def ask(client: anthropic.AsyncAnthropic, question: str) -> str:
-    response = await client.messages.create(
-        model="claude-haiku-5-5",
-        max_tokens=1024,
-        messages=[{"role": "user", "content": question}],
-    )
-    return "".join(b.text for b in response.content if b.type == "text")
-
-async def main() -> None:
-    client = anthropic.AsyncAnthropic()
-    answers = await asyncio.gather(
-        ask(client, "Capital of Japan? One word."),
-        ask(client, "Capital of Kenya? One word."),
-        ask(client, "Capital of Peru? One word."),
-    )
-    print(answers)
-
-asyncio.run(main())
-```
+**The async client.** `anthropic.AsyncAnthropic()` has the same methods; you `await` them, which lets you run several requests at once with `asyncio.gather` (Section 1, Lesson 23).
 
 **Common mistakes**
 - `response.content[0].text` → `AttributeError` when the first block is a `thinking` block. Always check `block.type`.
@@ -448,19 +422,12 @@ class Chat:
         return "".join(b.text for b in response.content if b.type == "text")
 
 
-def main() -> None:
-    chat = Chat(anthropic.Anthropic(), system="You are a friendly assistant. Keep answers short.")
-    while True:
-        text = input("You: ").strip()
-        if text in ("quit", "exit"):
-            break
-        if not text:
-            continue
-        print("Claude:", chat.send(text))
-
 
 if __name__ == "__main__":
-    main()
+    chat = Chat(anthropic.Anthropic(), system="You are a friendly assistant. Keep answers short.")
+    while (text := input("You: ").strip()) not in ("quit", "exit"):
+        if text:
+            print("Claude:", chat.send(text))
 ```
 
 Try: "My name is Sam." then "What's my name?". It works only because the first exchange is in `self.messages`.
@@ -541,17 +508,7 @@ match response.stop_reason:
         print("Stopped because:", other)
 ```
 
-**Stop sequences** let you end generation at a marker you choose:
-```python
-response = client.messages.create(
-    model="claude-haiku-5-5",
-    max_tokens=1024,
-    stop_sequences=["END"],
-    messages=[{"role": "user", "content": "List three fruits, one per line, then write END."}],
-)
-print(response.stop_reason)      # "stop_sequence"
-print(response.stop_sequence)    # "END"
-```
+**Stop sequences** end generation at a marker you choose: pass `stop_sequences=["END"]`, and when the model writes `END` you get `stop_reason == "stop_sequence"` and `response.stop_sequence == "END"`.
 
 **Refusals and fallbacks (good to know)**
 
@@ -617,24 +574,6 @@ print("output tokens:", final.usage.output_tokens)
 
 `get_final_message()` is the key helper: you get the live typing effect **and** a normal `Message` object at the end, which you can append to history exactly as in Lesson 4.
 
-**A streaming chat**
-```python
-def send_streaming(client: anthropic.Anthropic, messages: list[dict], system: str) -> None:
-    """Stream Claude's reply to the terminal and append it to messages."""
-    with client.messages.stream(
-        model="claude-opus-5-5",
-        max_tokens=64000,
-        system=system,
-        messages=messages,
-    ) as stream:
-        print("Claude: ", end="", flush=True)
-        for text in stream.text_stream:
-            print(text, end="", flush=True)
-        print()
-        final = stream.get_final_message()
-    messages.append({"role": "assistant", "content": final.content})
-```
-
 **Under the hood: events**
 
 `text_stream` is a convenience. The raw stream is a series of **events** (sent with Server-Sent Events, which you met in Section 2):
@@ -648,29 +587,7 @@ def send_streaming(client: anthropic.Anthropic, messages: list[dict], system: st
 | `message_delta` | Near the end: carries `stop_reason` and usage |
 | `message_stop` | Once, at the end |
 
-```python
-with client.messages.stream(
-    model="claude-haiku-5-5",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "Count to five."}],
-) as stream:
-    for event in stream:
-        if event.type == "content_block_delta" and event.delta.type == "text_delta":
-            print(event.delta.text, end="", flush=True)
-        elif event.type == "message_stop":
-            print("\n[done]")
-```
-
-**Async streaming** works the same with `AsyncAnthropic`, `async with` and `async for`:
-```python
-async with async_client.messages.stream(
-    model="claude-opus-5-5",
-    max_tokens=64000,
-    messages=[{"role": "user", "content": "Write a limerick."}],
-) as stream:
-    async for text in stream.text_stream:
-        print(text, end="", flush=True)
-```
+Iterate `for event in stream:` instead of `stream.text_stream` to see them. **Async streaming** works the same with `AsyncAnthropic`, `async with` and `async for`.
 
 **Why the pause before text?** On current models thinking happens first, and by default the thinking text isn't shown (the `thinking` blocks arrive empty). If you want to show a readable summary of the reasoning, pass `thinking={"type": "adaptive", "display": "summarized"}`.
 
@@ -844,18 +761,7 @@ for r in ["get rid of the gym task", "add buy milk", "show me overdue stuff", "t
 
 **Documents and quotes**
 
-For long documents: put the document **first** in tags, then the question, and ask for supporting quotes. This grounds the answer and reduces hallucination.
-```python
-prompt = f"""<document>
-{policy_text}
-</document>
-
-First, copy the sentences from the document that answer the question into <quotes> tags.
-Then answer the question in <answer> tags, using only those quotes.
-If the document doesn't answer it, say so in <answer>.
-
-Question: How many vacation days do new employees get?"""
-```
+For long documents: put the document **first** inside `<document>` tags, the question **last**, and ask Claude to copy the supporting sentences into `<quotes>` tags before answering in `<answer>` tags, saying so if the document doesn't contain the answer. Quoting first grounds the answer and reduces hallucination.
 
 **Common mistakes**
 - Mismatched or misspelled tags (`<example>` ... `</examples>`).
@@ -1016,32 +922,7 @@ What happens:
 2. It sends that schema in `output_config.format`, so the API constrains the output.
 3. It parses the reply back into a `TaskDraft`, so `draft.due` is a real `date` object.
 
-**Without Pydantic: a raw schema**
-```python
-import json
-
-response = client.messages.create(
-    model="claude-haiku-5-5",
-    max_tokens=2048,
-    messages=[{"role": "user", "content": "Is 'buy milk' a work task or a home task?"}],
-    output_config={
-        "format": {
-            "type": "json_schema",
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "category": {"type": "string", "enum": ["work", "home"]},
-                    "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
-                },
-                "required": ["category", "confidence"],
-                "additionalProperties": False,
-            },
-        }
-    },
-)
-text = "".join(b.text for b in response.content if b.type == "text")
-print(json.loads(text))
-```
+**Without Pydantic**, call `messages.create` with `output_config={"format": {"type": "json_schema", "schema": {...}}}` (every object needs `"additionalProperties": False`) and `json.loads` the text block. `parse()` does exactly this for you.
 
 **Schema limits to know.** The API supports most JSON Schema features (types, `enum`, nested objects, arrays, `anyOf`, formats like `date` and `email`) but not numeric ranges (`minimum`/`maximum`) or string length limits. Pydantic constraints like `Field(ge=1, le=3)` are stripped from the schema sent to the API and checked by the SDK afterwards, so prefer `Literal[1, 2, 3]` when there's a fixed set of values: the model can't produce anything else.
 
@@ -1129,22 +1010,7 @@ get_weather_tool = {
 | `{"type": "string", "format": "date"}` | `date` (sent as `"2026-11-04"`) |
 | `"required": ["city"]` | parameters without defaults |
 
-**Generate schemas from Pydantic** instead of writing them by hand:
-```python
-from typing import Literal
-from pydantic import BaseModel, Field
-
-class GetWeatherInput(BaseModel):
-    city: str = Field(description="City name, e.g. 'Paris, France'")
-    unit: Literal["celsius", "fahrenheit"] = Field(default="celsius", description="Temperature unit")
-
-get_weather_tool = {
-    "name": "get_weather",
-    "description": "Get the current weather for a city. Call this whenever the user asks about weather.",
-    "input_schema": GetWeatherInput.model_json_schema(),
-}
-```
-Bonus: the same model validates the arguments Claude sends (Lesson 13).
+**Generate schemas from Pydantic** instead of writing them by hand: define `class GetWeatherInput(BaseModel)` with `Field(description=...)` on each field and use `GetWeatherInput.model_json_schema()` as the `input_schema`. Bonus: the same model validates the arguments Claude sends (Lesson 13).
 
 **Writing good tool descriptions** (this is prompt engineering for tools)
 - Say **what** it does *and* **when** to call it: "Call this when the user asks about ..."
@@ -1312,10 +1178,6 @@ from typing import Any, Callable
 from pydantic import BaseModel, ValidationError
 
 
-class TaskNotFoundError(Exception):
-    pass
-
-
 class CityInput(BaseModel):
     city: str
 
@@ -1326,10 +1188,22 @@ def get_weather(args: CityInput) -> dict:
     return {"city": args.city, "temperature_c": 18}
 
 
-# name -> (input model, function)
-REGISTRY: dict[str, tuple[type[BaseModel], Callable[[Any], Any]]] = {
-    "get_weather": (CityInput, get_weather),
+# name -> (description, input model, function)
+REGISTRY: dict[str, tuple[str, type[BaseModel], Callable[[Any], Any]]] = {
+    "get_weather": (
+        "Get the current weather for a city. Call this whenever the user asks about weather.",
+        CityInput,
+        get_weather,
+    ),
 }
+
+
+def tool_definitions() -> list[dict]:
+    """Tool definitions for the API, built from the registry."""
+    return [
+        {"name": name, "description": description, "input_schema": model.model_json_schema()}
+        for name, (description, model, _) in REGISTRY.items()
+    ]
 
 
 def run_tool_call(block) -> dict:
@@ -1339,7 +1213,7 @@ def run_tool_call(block) -> dict:
 
     if block.name not in REGISTRY:
         return error(f"Unknown tool '{block.name}'.")
-    input_model, func = REGISTRY[block.name]
+    _, input_model, func = REGISTRY[block.name]
     try:
         args = input_model.model_validate(block.input)   # validate what Claude sent
         result = func(args)
@@ -1347,7 +1221,7 @@ def run_tool_call(block) -> dict:
         return error(f"Invalid arguments: {e}")
     except Exception as e:                               # tool failed: report, don't crash
         return error(f"{type(e).__name__}: {e}")
-    return {"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(result)}
+    return {"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(result, default=str)}
 
 
 def run_all_tool_calls(response) -> list[dict]:
@@ -1471,16 +1345,7 @@ def delete_file(path: str) -> str:
 
 **Async tools** use `@beta_async_tool` on `async def` functions with `AsyncAnthropic`.
 
-**Hand-written loop or tool runner?**
-
-| | Hand-written loop | Tool runner |
-|---|---|---|
-| Amount of code | More | Less |
-| Learning value | High: you see every message | Lower: it's hidden |
-| Control | Total | Hooks for approval, inspection, limits |
-| Stability | Uses only the stable API | Beta helper |
-
-Use the runner for most real projects. The capstone uses a hand-written loop so you understand and control every step; a runner version is a stretch goal.
+**Hand-written loop or tool runner?** The runner means less code and has hooks for approval and inspection; the hand-written loop shows you every message and uses only the stable API. Use the runner for most real projects. The capstone uses a hand-written loop so you understand and control every step; a runner version is a stretch goal.
 
 **Common mistakes**
 - Missing type hints or docstring `Args:` sections → vague schemas and wrong arguments.
@@ -1509,16 +1374,7 @@ Workflow vs agent:
 
 Start with the simplest thing that works. Use an agent when the steps genuinely can't be known in advance ("sort out my week" might need listing, completing, adding and deleting).
 
-**Step 1: the bare loop**
-```python
-while True:
-    response = client.messages.create(model=MODEL, max_tokens=16000,
-                                      system=SYSTEM, tools=TOOL_DEFS, messages=messages)
-    messages.append({"role": "assistant", "content": response.content})
-    if response.stop_reason != "tool_use":
-        break
-    messages.append({"role": "user", "content": run_all_tool_calls(response)})
-```
+**Step 1: the bare loop.** Call the API; append the reply; if `stop_reason` isn't `tool_use`, stop; otherwise run the tools, append all results in one user message, and go round again.
 
 **Step 2: add a step limit.** A confused model could loop forever, costing money. Cap the number of rounds.
 
@@ -1528,18 +1384,17 @@ while True:
 
 **Step 5: keep the conversation across user turns** so the user can say "actually, make it priority 1".
 
-**Step 6: wrap it in a class.**
+**Step 6: wrap it in a class** that reuses `run_tool_call` and `tool_definitions` from Lesson 13's `executor.py`.
 
 **Code: the finished agent**
 ```python
 # agent.py
-import json
 import logging
-from typing import Any, Callable
 
 import anthropic
 from dotenv import load_dotenv
-from pydantic import BaseModel, ValidationError
+
+from executor import run_tool_call, tool_definitions
 
 load_dotenv()
 logging.basicConfig(filename="agent.log", level=logging.INFO,
@@ -1547,66 +1402,24 @@ logging.basicConfig(filename="agent.log", level=logging.INFO,
 log = logging.getLogger("agent")
 
 
-class Tool:
-    """A function the agent may call, with a Pydantic model describing its input."""
-
-    def __init__(self, name: str, description: str, input_model: type[BaseModel],
-                 func: Callable[[Any], Any]):
-        self.name = name
-        self.description = description
-        self.input_model = input_model
-        self.func = func
-
-    def definition(self) -> dict:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "input_schema": self.input_model.model_json_schema(),
-        }
-
-
 class Agent:
-    def __init__(self, client: anthropic.Anthropic, system: str, tools: list[Tool],
+    def __init__(self, client: anthropic.Anthropic, system: str,
                  model: str = "claude-opus-5-5", max_steps: int = 10):
         self.client = client
         self.system = system
-        self.tools = {t.name: t for t in tools}
         self.model = model
         self.max_steps = max_steps
         self.messages: list[dict] = []
 
-    def _run_tool(self, block) -> dict:
-        def result(content: str, is_error: bool = False) -> dict:
-            out = {"type": "tool_result", "tool_use_id": block.id, "content": content}
-            if is_error:
-                out["is_error"] = True
-            return out
-
-        tool = self.tools.get(block.name)
-        if tool is None:
-            return result(f"Unknown tool '{block.name}'.", is_error=True)
-        try:
-            args = tool.input_model.model_validate(block.input)
-            value = tool.func(args)
-        except ValidationError as e:
-            log.warning("Bad input for %s: %s", block.name, e)
-            return result(f"Invalid arguments: {e}", is_error=True)
-        except Exception as e:
-            log.exception("Tool %s failed", block.name)
-            return result(f"{type(e).__name__}: {e}", is_error=True)
-        log.info("Tool %s(%s) -> %s", block.name, block.input, value)
-        return result(json.dumps(value, default=str))
-
     def ask(self, user_text: str) -> str:
         self.messages.append({"role": "user", "content": user_text})
-        tool_defs = [t.definition() for t in self.tools.values()]
 
         for step in range(1, self.max_steps + 1):
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=16000,
                 system=self.system,
-                tools=tool_defs,
+                tools=tool_definitions(),
                 messages=self.messages,
             )
             log.info("Step %d: stop_reason=%s usage=%s", step, response.stop_reason, response.usage)
@@ -1616,27 +1429,34 @@ class Agent:
                 return f"(Sorry, I couldn't finish that: {response.stop_reason}.)"
 
             self.messages.append({"role": "assistant", "content": response.content})
-            text = "".join(b.text for b in response.content if b.type == "text")
 
             if response.stop_reason != "tool_use":
-                return text
+                return "".join(b.text for b in response.content if b.type == "text")
 
-            tool_results = [self._run_tool(b) for b in response.content if b.type == "tool_use"]
-            self.messages.append({"role": "user", "content": tool_results})
+            results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    result = run_tool_call(block)
+                    log.info("Tool %s(%s) -> %s", block.name, block.input, result["content"][:200])
+                    results.append(result)
+            self.messages.append({"role": "user", "content": results})
 
         return "(Stopped: too many steps. Try a simpler request.)"
 ```
 
-Using it with a toy tool:
+Using it with a toy tool (registered in the Lesson 13 registry):
 ```python
+from pydantic import BaseModel
+from executor import REGISTRY
+
 class AddInput(BaseModel):
     a: float
     b: float
 
-calculator = Tool("add", "Add two numbers. Use for any addition.", AddInput,
-                  lambda args: {"sum": args.a + args.b})
+REGISTRY["add"] = ("Add two numbers. Use this for any addition.", AddInput,
+                   lambda args: {"sum": args.a + args.b})
 
-agent = Agent(anthropic.Anthropic(), system="You are a careful maths helper.", tools=[calculator])
+agent = Agent(anthropic.Anthropic(), system="You are a careful maths helper.")
 print(agent.ask("What is 1234.5 + 98.25, and then that result + 1?"))
 ```
 
@@ -1720,25 +1540,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-**Your own tools in the Agent SDK** are served as an in-process MCP server (Lesson 17 explains MCP):
-```python
-from claude_agent_sdk import ClaudeAgentOptions, create_sdk_mcp_server, tool
-
-
-@tool("add_task", "Add a task to the user's to-do list", {"title": str, "priority": int})
-async def add_task(args: dict) -> dict:
-    # call your Section 1 service.add_task here
-    return {"content": [{"type": "text", "text": f"Added: {args['title']}"}]}
-
-
-tasks_server = create_sdk_mcp_server(name="tasks", version="1.0.0", tools=[add_task])
-
-options = ClaudeAgentOptions(
-    model="claude-opus-5-5",
-    mcp_servers={"tasks": tasks_server},
-    allowed_tools=["mcp__tasks__add_task"],   # MCP tool names are mcp__<server>__<tool>
-)
-```
+**Your own tools** can be added to the Agent SDK too: you define them with its `@tool` decorator and serve them as an in-process MCP server (`create_sdk_mcp_server`); they then appear to Claude with names like `mcp__tasks__add_task`. Lesson 17 explains MCP.
 
 **When to use which.** For this course's assistant, your own loop or the tool runner is the right fit: you have a small set of your own tools and want to understand every step. Reach for the Agent SDK when you want an agent that works with files and the shell (a coding helper, a "tidy my notes folder" bot) without building those tools yourself. Be careful with permissions: `allowed_tools` and `permission_mode` decide what it may do without asking.
 
@@ -1821,34 +1623,7 @@ Just like `@beta_tool`, the decorator builds each tool's schema from the type hi
 claude mcp add work-organizer -- python /full/path/to/tasks_server.py
 ```
 
-**Using it from your own Python code**
-```python
-# mcp_client.py
-import asyncio
-import sys
-
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-
-
-async def main() -> None:
-    params = StdioServerParameters(command=sys.executable, args=["tasks_server.py"])
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-
-            tools = await session.list_tools()
-            for t in tools.tools:
-                print(t.name, "->", t.input_schema)
-
-            result = await session.call_tool("add_task", {"title": "Write report", "priority": 1})
-            for block in result.content:
-                if block.type == "text":
-                    print(block.text)
-
-
-asyncio.run(main())
-```
+**Using it from your own Python code.** The `mcp` package also has a client: `stdio_client(StdioServerParameters(command=..., args=[...]))` starts your server as a subprocess, and a `ClientSession` on top of it can `list_tools()` and `call_tool(name, arguments)`. The next example uses exactly that, then hands the tools to Claude.
 
 **Connecting MCP tools to Claude.** The `anthropic` SDK can convert MCP tools into tool-runner tools. Install the extra:
 ```bash
@@ -2090,17 +1865,7 @@ for question in ["How many vacation days do I get?", "What's the expenses policy
 ```
 Expected: the first call shows a large `cache write`; the second shows a large `cache read`.
 
-**Manual cache points.** For finer control, mark specific blocks:
-```python
-response = client.messages.create(
-    model="claude-opus-5-5",
-    max_tokens=16000,
-    system=[
-        {"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}},
-    ],
-    messages=[{"role": "user", "content": "What's the remote work policy?"}],
-)
-```
+**Manual cache points.** For finer control, pass `system` as a list of blocks and add `"cache_control": {"type": "ephemeral"}` to the block where the cacheable prefix ends (up to 4 cache points per request).
 
 **Silent cache killers**
 
@@ -2213,26 +1978,7 @@ def safe_ask(question: str) -> str:
 
 Order matters: Python uses the first matching `except`, so specific classes go before their parent `APIStatusError`.
 
-**Your own retry on top of the SDK's**, for long-running jobs that should survive minutes-long problems:
-```python
-import random
-import time
-
-import anthropic
-
-
-def create_with_backoff(client: anthropic.Anthropic, attempts: int = 6, **kwargs):
-    for attempt in range(attempts):
-        try:
-            return client.messages.create(**kwargs)
-        except (anthropic.RateLimitError, anthropic.InternalServerError,
-                anthropic.OverloadedError, anthropic.APIConnectionError) as e:
-            if attempt == attempts - 1:
-                raise
-            delay = min(2 ** attempt + random.uniform(0, 1), 60)   # backoff + jitter
-            print(f"{type(e).__name__}; retrying in {delay:.1f}s")
-            time.sleep(delay)
-```
+**Your own retry on top of the SDK's** is only needed for long-running jobs that should survive minutes-long problems: wrap the call in the backoff loop from Section 1, Lesson 15, retrying only `RateLimitError`, `InternalServerError`, `OverloadedError` and `APIConnectionError`.
 
 **Staying under rate limits**
 - Limit concurrency: with async, use `asyncio.Semaphore(5)` so at most 5 requests run at once.
@@ -2283,9 +2029,6 @@ Prefer code checks wherever possible; they're free, fast and consistent. Use an 
 **Code: evaluating the intent classifier**
 ```python
 # eval_classifier.py
-import json
-from datetime import datetime
-from pathlib import Path
 from typing import Literal
 
 import anthropic
@@ -2351,10 +2094,6 @@ def run_eval(version: str, model: str = "claude-haiku-5-5") -> float:
         if not r["pass"]:
             print(f"  FAIL {r['message']!r}: expected {r['expected']}, got {r['got']}")
 
-    out = Path("evals") / f"{datetime.now():%Y%m%d-%H%M%S}-{version}.json"
-    out.parent.mkdir(exist_ok=True)
-    out.write_text(json.dumps({"version": version, "model": model, "score": score,
-                               "results": results}, indent=2), encoding="utf-8")
     return score
 
 
@@ -2391,6 +2130,7 @@ def judge(user_message: str, assistant_reply: str) -> Verdict:
 ```
 
 **Good eval habits**
+- **Save every run** (version, model, score, each result) to a timestamped JSON file so you can compare later.
 - **Never change the test set and the prompt at the same time**, or you can't compare scores.
 - Hold some cases back: tune on most, then check on unseen ones, so you're not just memorising your tests.
 - Run each case more than once if results vary; look at the pass rate.
@@ -2826,43 +2566,6 @@ Before starting Section 4, you should be able to do all of this **without lookin
 
 Try every exercise yourself first. Look here only after a real attempt (at least 20 minutes). All solutions assume `load_dotenv()` has run and `client = anthropic.Anthropic()` exists.
 
-**Lesson 3, Exercise 3**
-```python
-def ask(question: str, model: str = "claude-haiku-5-5") -> str:
-    response = client.messages.create(
-        model=model,
-        max_tokens=4096,
-        messages=[{"role": "user", "content": question}],
-    )
-    return "".join(b.text for b in response.content if b.type == "text")
-
-for q in ["What is 7 * 8?", "Name a blue fruit.", "Spell 'organizer' backwards."]:
-    print(q, "->", ask(q))
-```
-
-**Lesson 4, Exercise 3**
-```python
-import json
-from pathlib import Path
-
-HISTORY_FILE = Path("chat.json")
-
-def save_history(messages: list[dict]) -> None:
-    serializable = []
-    for m in messages:
-        content = m["content"]
-        if not isinstance(content, str):
-            content = [b if isinstance(b, dict) else b.to_dict() for b in content]
-        serializable.append({"role": m["role"], "content": content})
-    HISTORY_FILE.write_text(json.dumps(serializable, indent=2), encoding="utf-8")
-
-def load_history() -> list[dict]:
-    if not HISTORY_FILE.exists():
-        return []
-    return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
-```
-The loaded dicts can be sent straight back as `messages`; the API accepts plain dicts and SDK objects alike.
-
 **Lesson 5, Exercise 1**
 ```python
 class TruncatedError(Exception):
@@ -2878,23 +2581,6 @@ def ask_safely(question: str, max_tokens: int = 4096) -> str:
     if response.stop_reason == "max_tokens":
         raise TruncatedError(f"Reply cut off after {response.usage.output_tokens} tokens: {text[:80]}...")
     return text
-```
-
-**Lesson 8, Exercise 2**
-```python
-email = """Hi! Can we move our call from 12 March to 14 March?
-Also the invoice is due 2026-04-01, and the offsite is the first week of May."""
-
-response = client.messages.create(
-    model="claude-haiku-5-5",
-    max_tokens=2048,
-    system="Extract every date or date range mentioned in the email. Output each one, "
-           "exactly as written, inside its own <date></date> tags. Output nothing else.",
-    messages=[{"role": "user", "content": f"<email>{email}</email>"}],
-)
-text = "".join(b.text for b in response.content if b.type == "text")
-dates = [part.split("</date>")[0].strip() for part in text.split("<date>")[1:]]
-print(dates)
 ```
 
 **Lesson 10, Exercise 2**
@@ -2915,114 +2601,6 @@ def extract_tasks(message: str, today: date) -> list[TaskDraft]:
 
 for t in extract_tasks("Buy milk, call the plumber tomorrow (urgent!), and book flights for work", date.today()):
     print(t)
-```
-
-**Lesson 12, Exercise 2**
-```python
-def ask_with_tools(question: str) -> str:
-    messages = [{"role": "user", "content": question}]
-    response = client.messages.create(model=MODEL, max_tokens=16000, tools=TOOLS, messages=messages)
-    if response.stop_reason != "tool_use":
-        return "".join(b.text for b in response.content if b.type == "text")
-
-    messages.append({"role": "assistant", "content": response.content})
-    results = []
-    for block in response.content:
-        if block.type == "tool_use":
-            output = get_weather(**block.input)
-            results.append({"type": "tool_result", "tool_use_id": block.id,
-                            "content": json.dumps(output)})
-    messages.append({"role": "user", "content": results})
-
-    final = client.messages.create(model=MODEL, max_tokens=16000, tools=TOOLS, messages=messages)
-    return "".join(b.text for b in final.content if b.type == "text")
-```
-
-**Lesson 13, Exercise 2**
-```python
-import asyncio
-import json
-import time
-
-async def get_weather_async(city: str) -> dict:
-    await asyncio.sleep(1)   # pretend network call
-    return {"city": city, "temperature_c": 18}
-
-async def run_tool_calls_concurrently(response) -> list[dict]:
-    calls = [b for b in response.content if b.type == "tool_use"]
-    outputs = await asyncio.gather(
-        *(get_weather_async(**b.input) for b in calls), return_exceptions=True
-    )
-    results = []
-    for block, output in zip(calls, outputs):
-        if isinstance(output, Exception):
-            results.append({"type": "tool_result", "tool_use_id": block.id,
-                            "content": str(output), "is_error": True})
-        else:
-            results.append({"type": "tool_result", "tool_use_id": block.id,
-                            "content": json.dumps(output)})
-    return results
-
-# start = time.perf_counter()
-# results = asyncio.run(run_tool_calls_concurrently(response))
-# print(f"{time.perf_counter() - start:.1f}s")   # ~1s for three cities, not ~3s
-```
-
-**Lesson 15, Exercise 2**
-```python
-# In Agent.__init__:
-self.total_tokens = 0
-
-# In Agent.ask, right after each messages.create call:
-self.total_tokens += response.usage.input_tokens + response.usage.output_tokens
-
-# After calling ask:
-print(agent.ask("What is 2 + 2?"))
-print("Tokens so far:", agent.total_tokens)
-```
-
-**Lesson 17, Exercise 1**
-```python
-@mcp.tool()
-def complete_task(task_id: int) -> str:
-    """Mark a task as done.
-
-    Args:
-        task_id: The numeric id shown by list_tasks.
-    """
-    for task in TASKS:
-        if task["id"] == task_id:
-            task["done"] = True
-            return f"Completed task {task_id}: {task['title']}"
-    return f"Error: no task with id {task_id}. Call list_tasks to see valid ids."
-```
-
-**Lesson 20, Exercise 3**
-```python
-import asyncio
-import time
-
-import anthropic
-
-async def limited_ask(client, sem: asyncio.Semaphore, i: int) -> str:
-    async with sem:
-        start = time.perf_counter()
-        response = await client.messages.create(
-            model="claude-haiku-5-5",
-            max_tokens=1024,
-            output_config={"effort": "low"},
-            messages=[{"role": "user", "content": f"Say the number {i} as a word."}],
-        )
-        print(f"#{i:2} took {time.perf_counter() - start:.2f}s")
-        return "".join(b.text for b in response.content if b.type == "text")
-
-async def main() -> None:
-    client = anthropic.AsyncAnthropic()
-    sem = asyncio.Semaphore(3)   # at most 3 requests in flight
-    answers = await asyncio.gather(*(limited_ask(client, sem, i) for i in range(20)))
-    print(answers)
-
-asyncio.run(main())
 ```
 
 **Capstone: the agent loop (try it yourself first!)**

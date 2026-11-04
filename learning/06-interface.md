@@ -1378,7 +1378,8 @@ SYSTEM_PROMPT = (
 
 Event = dict[str, Any]
 
-client = AsyncAnthropic()
+# A fresh client per turn (see below) makes stream_agent safe to call from any event loop or thread.
+client_factory = AsyncAnthropic
 # In-memory history keeps this lesson self-contained.
 # Swap these for your Section 4 memory functions so history survives restarts.
 HISTORY: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -1399,71 +1400,63 @@ async def stream_agent(user_id: str, message: str) -> AsyncIterator[Event]:
             message = "\n".join(f"[App note: {n}]" for n in notes) + "\n\n" + message
         messages.append({"role": "user", "content": message})
         try:
-            for _ in range(MAX_TURNS):
-                turn_had_text = False
-                async with client.messages.stream(
-                    model=MODEL,
-                    max_tokens=MAX_TOKENS,
-                    system=SYSTEM_PROMPT,
-                    tools=TOOL_SCHEMAS,
-                    messages=messages,
-                ) as stream:
-                    async for event in stream:
-                        if event.type == "text":
-                            turn_had_text = True
-                            yield {"type": "text", "text": event.text}
-                        elif event.type == "content_block_start" and event.content_block.type == "tool_use":
-                            yield {"type": "tool_start", "name": event.content_block.name}
-                    final = await stream.get_final_message()
-
-                messages.append({"role": "assistant", "content": final.content})
-                if final.stop_reason != "tool_use":
-                    break
-
-                if turn_had_text:
-                    yield {"type": "text", "text": "\n\n"}     # keep text from separate turns apart
-
-                tool_results = []
-                for block in final.content:
-                    if block.type != "tool_use":
-                        continue
-                    if block.name in RISKY_TOOLS:
-                        action = await asyncio.to_thread(
-                            confirmations.create, user_id, block.name, block.input
-                        )
-                        yield {
-                            "type": "confirm",
-                            "action_id": action.id,
-                            "tool": block.name,
-                            "summary": action.summary,
-                        }
-                        content = (
-                            f"Not executed yet. Action {action.id} is waiting for the user to approve it."
-                        )
-                        is_error = False
-                    else:
-                        try:
-                            content = str(await asyncio.to_thread(run_tool, block.name, block.input))
-                            is_error = False
-                        except Exception as e:
-                            content = f"Tool error: {e}"
-                            is_error = True
-                        yield {"type": "tool_end", "name": block.name, "ok": not is_error}
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": content,
-                        "is_error": is_error,
-                    })
-                messages.append({"role": "user", "content": tool_results})
-            else:
-                yield {"type": "text", "text": "\n\n(I stopped after too many steps. Try a simpler request.)"}
+            async with client_factory() as client:
+                async for event in _agent_loop(client, user_id, messages):
+                    yield event
         except BaseException:
             # Error or client disconnected mid-turn: roll back this turn so history stays valid
             # (an assistant tool_use without a matching tool_result would break every later call).
             del messages[start_len:]
             raise
     yield {"type": "done"}
+
+async def _agent_loop(client: AsyncAnthropic, user_id: str, messages: list) -> AsyncIterator[Event]:
+    for _ in range(MAX_TURNS):
+        turn_had_text = False
+        async with client.messages.stream(
+            model=MODEL,
+            max_tokens=MAX_TOKENS,
+            system=SYSTEM_PROMPT,
+            tools=TOOL_SCHEMAS,
+            messages=messages,
+        ) as stream:
+            async for event in stream:
+                if event.type == "text":
+                    turn_had_text = True
+                    yield {"type": "text", "text": event.text}
+                elif event.type == "content_block_start" and event.content_block.type == "tool_use":
+                    yield {"type": "tool_start", "name": event.content_block.name}
+            final = await stream.get_final_message()
+
+        messages.append({"role": "assistant", "content": final.content})
+        if final.stop_reason != "tool_use":
+            return
+        if turn_had_text:
+            yield {"type": "text", "text": "\n\n"}          # keep text from separate turns apart
+
+        tool_results = []
+        for block in final.content:
+            if block.type != "tool_use":
+                continue
+            if block.name in RISKY_TOOLS:
+                action = await asyncio.to_thread(confirmations.create, user_id, block.name, block.input)
+                yield {"type": "confirm", "action_id": action.id, "tool": block.name, "summary": action.summary}
+                content = f"Not executed yet. Action {action.id} is waiting for the user to approve it."
+                is_error = False
+            else:
+                try:
+                    content = str(await asyncio.to_thread(run_tool, block.name, block.input))
+                    is_error = False
+                except Exception as e:
+                    content = f"Tool error: {e}"
+                    is_error = True
+                yield {"type": "tool_end", "name": block.name, "ok": not is_error}
+            tool_results.append(
+                {"type": "tool_result", "tool_use_id": block.id, "content": content, "is_error": is_error}
+            )
+        messages.append({"role": "user", "content": tool_results})
+
+    yield {"type": "text", "text": "\n\n(I stopped after too many steps. Try a simpler request.)"}
 
 async def collect_reply(user_id: str, message: str) -> tuple[str, list[Event]]:
     """For interfaces that don't stream: return (full reply text, confirm events)."""
@@ -1483,6 +1476,12 @@ repeat until it stops — with four additions:
 2. Risky tools go through `confirmations` (Lesson 4) instead of running.
 3. A per-user **lock** stops two messages from the same user (say, from phone and laptop at once) from interleaving their history.
 4. If anything fails mid-turn, the turn is **rolled back**, so one network blip doesn't corrupt the conversation forever.
+
+Why a new `AsyncAnthropic` client per turn instead of one global client? An async client keeps a pool of network
+connections tied to the event loop that created them. The CLI and voice loop call `asyncio.run` once per message (a new
+loop each time), and bots may call from worker threads; reusing one global async client across loops can fail with
+"Event loop is closed". A client per turn costs a few milliseconds and avoids the whole problem. `client_factory` is a
+variable so tests can swap in a fake.
 
 From now on this is your agent's single core. Your old `run_agent` can become a thin wrapper:
 ```python
@@ -1538,7 +1537,7 @@ ask about each confirm with `Confirm.ask("Approve?", default=False)` and call `c
 **Exercises**
 1. Add a `usage` event at the end of `stream_agent` with the total input and output tokens across all turns, and show it dimmed in the CLI.
 2. Make the CLI show a friendlier label than the raw tool name (e.g. `list_tasks` → "Looking at your tasks"). Keep the labels in one dictionary.
-3. Write a test that replaces `organizer.streaming.client` with a fake object so you can test `stream_agent` without calling the real API. (This is hard — try for 30 minutes, then read the solution.)
+3. Write a test that replaces `organizer.streaming.client_factory` with a fake so you can test `stream_agent` without calling the real API. (This is hard — try for 30 minutes, then read the solution.)
 
 **Check yourself**
 - What's the difference between `stream.text_stream` and iterating over `stream` directly?
@@ -2601,17 +2600,6 @@ def record_push_to_talk(path: Path) -> Path | None:
     return path
 ```
 
-```python
-# quick test
-from pathlib import Path
-from voice.record import record_push_to_talk
-from voice.stt import transcribe_api
-
-audio = record_push_to_talk(Path("data/test.wav"))
-if audio:
-    print("You said:", transcribe_api(audio))
-```
-
 **Code — Telegram voice notes**
 
 The easiest voice interface is one you already have: hold the microphone button in Telegram, and your bot transcribes
@@ -2679,7 +2667,7 @@ from openai import OpenAI
 _openai = None
 
 def clean_for_speech(text: str) -> str:
-    text = re.sub(r"```.*?```", " (code omitted) ", text, flags=re.DOTALL)
+    text = re.sub(r"`{3}.*?`{3}", " (code omitted) ", text, flags=re.DOTALL)   # fenced code blocks
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)      # [label](url) -> label
     text = re.sub(r"[*_#`>|]", "", text)                       # leftover Markdown symbols
     return re.sub(r"\s+", " ", text).strip()
@@ -2931,30 +2919,16 @@ work_organizer/
 
 ### Starter skeleton (fill in the TODOs)
 
+Start from the `server/main.py` you built in Lessons 9–10 (streaming `/chat`, the two action endpoints, the static
+mount last). Add the missing pieces:
+
 ```python
-# server/main.py
-import asyncio
-import json
-import logging
-from pathlib import Path
-from typing import Annotated, Literal
-
-import anthropic
-from fastapi import Depends, FastAPI, HTTPException, Query
+# server/main.py — additions
+from typing import Literal
+from fastapi import Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-
-from organizer import confirmations
-from organizer.streaming import add_note, stream_agent
-from server.auth import require_user
 from server.settings import get_settings
 
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("server")
-
-app = FastAPI(title="Work Organizer API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().allowed_origins,
@@ -2962,61 +2936,28 @@ app.add_middleware(
     allow_headers=["Content-Type", "X-API-Key"],
 )
 
-CurrentUser = Annotated[str, Depends(require_user)]
-
-class ChatRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=8000)
-
-class ActionResult(BaseModel):
-    result: str
-
 class PendingActionOut(BaseModel):
     id: str
     tool_name: str
     summary: str
 
-def sse(event: dict) -> str:
-    # TODO: return the event in SSE wire format (JSON-encoded, ends with a blank line)
-    ...
-
-def friendly_error(exc: Exception) -> str:
-    # TODO: map RateLimitError, APIConnectionError, 5xx APIStatusError to friendly text (Lesson 9)
-    ...
-
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok"}
-
-@app.post("/chat")
-async def chat(body: ChatRequest, user_id: CurrentUser) -> StreamingResponse:
-    async def events():
-        # TODO: iterate stream_agent(user_id, body.message) and yield sse(event)
-        # TODO: on exception: log it, yield an "error" event with friendly_error(exc), then a "done" event
-        ...
-    # TODO: return a StreamingResponse with media_type="text/event-stream" and no-cache headers
-    ...
+    return {"status": "ok"}                     # the only route without require_user
 
 @app.get("/actions")
 async def list_actions(
-    user_id: CurrentUser,
+    user_id: Annotated[str, Depends(require_user)],
     status: Annotated[Literal["pending"], Query()] = "pending",
 ) -> list[PendingActionOut]:
-    # TODO: use confirmations.list_pending(user_id) (in a thread) and convert to PendingActionOut
+    # TODO: call confirmations.list_pending(user_id) in a thread
+    # TODO: convert each PendingAction into PendingActionOut and return the list
     ...
 
-@app.post("/actions/{action_id}/approve")
-async def approve_action(action_id: str, user_id: CurrentUser) -> ActionResult:
-    # TODO: 404 if the action doesn't exist or belongs to someone else
-    # TODO: run confirmations.approve in a thread, add_note(...) so the agent knows, return the result
-    ...
-
-@app.post("/actions/{action_id}/reject")
-async def reject_action(action_id: str, user_id: CurrentUser) -> ActionResult:
-    # TODO
-    ...
-
-# Must stay LAST: serves server/static/index.html at "/"
-app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")
+# TODO: in approve_action, also return 409 Conflict (not 200) when the action was already handled or expired,
+#       so the web page can show it differently. Hint: check action.status before approving.
+# TODO: replace the in-memory HISTORY in organizer/streaming.py with your Section 4 memory, so the
+#       Telegram bot process and the server process share one conversation.
 ```
 
 ```python
@@ -3047,8 +2988,7 @@ ALLOWED_IDS = {int(x) for x in os.environ["TELEGRAM_ALLOWED_USER_IDS"].split(","
 ALLOWED = filters.User(user_id=ALLOWED_IDS)
 
 def split_message(text: str, limit: int = 4096) -> list[str]:
-    # TODO: copy from Lesson 3
-    ...
+    ...                                        # TODO: copy from Lesson 3
 
 def confirm_keyboard(action_id: str) -> InlineKeyboardMarkup:
     # TODO: one row with "Approve" (approve:<id>) and "Cancel" (reject:<id>) buttons
@@ -3122,8 +3062,7 @@ if __name__ == "__main__":
 # tests/test_api.py (starter)
 import os
 
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")    # the SDK client is created at import time
-os.environ.setdefault("API_KEY", "test-api-key")
+os.environ.setdefault("API_KEY", "test-api-key")          # must be set before settings are first read
 
 from fastapi.testclient import TestClient
 from server.main import app
@@ -3232,24 +3171,6 @@ Before moving on, you should be able to do all of this **without looking things 
 
 Try every exercise yourself first. Look here only after a real attempt (at least 20 minutes).
 
-**Lesson 2, Exercise 1**
-```python
-from rich.table import Table
-from organizer.tools import TASKS        # or however your project loads tasks
-
-@app.command()
-def tasks() -> None:
-    """Show pending tasks."""
-    table = Table(title="Pending tasks")
-    table.add_column("ID", style="dim")
-    table.add_column("Title")
-    table.add_column("Priority", justify="right")
-    for t in sorted(TASKS, key=lambda t: t["priority"]):
-        style = "bold red" if t["priority"] == 1 else None
-        table.add_row(t["id"], t["title"], str(t["priority"]), style=style)
-    console.print(table)
-```
-
 **Lesson 3, Exercise 2**
 ```python
 import time
@@ -3294,27 +3215,11 @@ async def task_summary() -> TaskSummary:
 Because `task_id` is typed `int`, a request for `/tasks/summary` that reached the `{task_id}` route would fail with a
 422 ("summary" isn't an integer). Ordering the fixed path first avoids this.
 
-**Lesson 6, Exercise 2** (assuming `Task` has `tags: list[str] = []`)
-```python
-@app.get("/tasks")
-async def list_tasks(
-    tag: Annotated[list[str] | None, Query()] = None,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
-) -> list[Task]:
-    tasks = list(TASKS.values())
-    if tag:
-        wanted = set(tag)
-        tasks = [t for t in tasks if wanted & set(t.tags)]   # has at least one of the tags
-    return tasks[:limit]
-```
-Request: `/tasks?tag=work&tag=urgent`. Without `Query()`, FastAPI would expect a list in the request *body*.
-
 **Lesson 7, Exercise 3**
 ```python
 # tests/test_auth.py
 import os
 os.environ.setdefault("API_KEY", "unused")
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
 
 from fastapi.testclient import TestClient
 from server.main import app
@@ -3339,10 +3244,7 @@ def test_me_with_key_is_200():
 ```python
 # tests/test_streaming.py
 import asyncio
-import os
 from types import SimpleNamespace as NS
-
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")   # AsyncAnthropic() needs a key at import time
 
 import organizer.streaming as streaming
 
@@ -3375,6 +3277,17 @@ class FakeMessages:
     def stream(self, **kwargs):
         return self.streams.pop(0)
 
+class FakeClient:
+    """Mimics AsyncAnthropic: an async context manager with a .messages attribute."""
+    def __init__(self, streams):
+        self.messages = FakeMessages(streams)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
 def run_events(user_id: str, message: str) -> list[dict]:
     async def go():
         return [e async for e in streaming.stream_agent(user_id, message)]
@@ -3382,8 +3295,8 @@ def run_events(user_id: str, message: str) -> list[dict]:
 
 def test_plain_text_reply(monkeypatch):
     final = NS(stop_reason="end_turn", content=[NS(type="text", text="Hello there")])
-    fake_client = NS(messages=FakeMessages([FakeStream(["Hello", " there"], final)]))
-    monkeypatch.setattr(streaming, "client", fake_client)
+    fake = FakeClient([FakeStream(["Hello", " there"], final)])
+    monkeypatch.setattr(streaming, "client_factory", lambda: fake)
     streaming.HISTORY.clear()
 
     events = run_events("u1", "hi")
@@ -3396,7 +3309,8 @@ def test_tool_call_then_answer(monkeypatch):
     tool_block = NS(type="tool_use", id="tu_1", name="list_tasks", input={})
     first = FakeStream([], NS(stop_reason="tool_use", content=[tool_block]))
     second = FakeStream(["2 tasks"], NS(stop_reason="end_turn", content=[NS(type="text", text="2 tasks")]))
-    monkeypatch.setattr(streaming, "client", NS(messages=FakeMessages([first, second])))
+    fake = FakeClient([first, second])
+    monkeypatch.setattr(streaming, "client_factory", lambda: fake)
     monkeypatch.setattr(streaming, "run_tool", lambda name, args: "[...]")
     streaming.HISTORY.clear()
 
@@ -3453,36 +3367,6 @@ if (err.name === "AbortError") {
 }
 ```
 When the browser aborts, the server sees the disconnect, cancels the generator, and `stream_agent` rolls the turn back.
-
-**Lesson 11, Exercise 3**
-```tsx
-type Filter = "all" | "pending" | "done";
-type Task = { id: string; title: string; done: boolean };
-
-function TaskBoard({ tasks }: { tasks: Task[] }) {
-  const [filter, setFilter] = useState<Filter>("pending");
-  const visible = tasks.filter((t) =>
-    filter === "all" ? true : filter === "done" ? t.done : !t.done,
-  );                                            // derived during render, not stored in state
-  return (
-    <>
-      {(["all", "pending", "done"] as const).map((f) => (
-        <button key={f} disabled={f === filter} onClick={() => setFilter(f)}>{f}</button>
-      ))}
-      <ul>{visible.map((t) => <li key={t.id}>{t.title}</li>)}</ul>
-    </>
-  );
-}
-```
-Storing `visible` in state too would mean two sources of truth that can drift apart.
-
-**Lesson 16, Exercise 1** (Telegram status message)
-```python
-from organizer.ux import tool_label
-
-case "tool_start":
-    await set_status(status, tool_label(event["name"]) + "...")
-```
 
 ---
 
