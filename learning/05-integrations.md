@@ -11,7 +11,8 @@ Work through it in order. Each lesson has:
 - **Exercises**: do them before moving on
 - **Check yourself**: you should be able to answer these without looking
 
-Total time: roughly **9–11 weeks at 1–2 hours a day**. Going slower is fine; skipping is not.
+Total time: roughly **4–6 weeks at 2 hours a day** (8–11 weeks at 1 hour a day). In Part C, study only the
+platforms you actually use. Going slower is fine; skipping the safety lessons (1–3) is not.
 
 **Before you start** you should have finished:
 - Section 1 (Python, the CLI Work Organizer, `service.py`)
@@ -2013,6 +2014,8 @@ async def today(update, context):
     await update.message.reply_text(text)
 ```
 
+Section 6 builds a full chat interface on these bots; here you only need notifications and a command or two.
+
 **Common mistakes**
 - No allow-list: your personal assistant is now everyone's assistant.
 - Messages over the length limit (Telegram 4096, Discord 2000) fail. Split or truncate.
@@ -2114,7 +2117,8 @@ response = client.messages.create(
 print("".join(block.text for block in response.content if block.type == "text"))
 ```
 
-You can mix server tools and your own tools in the same `tools` list. Your agent loop only executes
+The `_20250305` suffix is the tool's version; newer versions are released from time to time, so check
+the Anthropic docs for the latest one. You can mix server tools and your own tools in the same `tools` list. Your agent loop only executes
 `tool_use` blocks for *your* tools; server tool results arrive already filled in.
 
 **Make search a good tool** (Lesson 1 again):
@@ -2304,13 +2308,15 @@ for b in scrape_books()[:5]:
     print(b)
 ```
 
-**The same thing with selectolax** (often 10–30× faster on big pages; similar CSS-selector API):
+**The same thing with selectolax** (often 10–30× faster on big pages; similar CSS-selector API).
+Use its **Lexbor** backend; the older `selectolax.parser.HTMLParser` (Modest backend) is deprecated and
+newer versions refuse to import it:
 
 ```python
-from selectolax.parser import HTMLParser
+from selectolax.lexbor import LexborHTMLParser
 
 def scrape_books_fast(html: str) -> list[dict]:
-    tree = HTMLParser(html)
+    tree = LexborHTMLParser(html)
     out = []
     for card in tree.css("article.product_pod"):
         link = card.css_first("h3 a")
@@ -3161,8 +3167,9 @@ Scheduler types:
 - `AsyncIOScheduler` — for asyncio apps (e.g. your Telegram bot); jobs can be `async def`.
 
 **Careful:** APScheduler's `day_of_week` numbers start at **0 = Monday**, while cron's start at
-**0 = Sunday**. Use names (`mon-fri`) and avoid the confusion. `CronTrigger.from_crontab("0 8 * * 1-5")`
-converts standard cron syntax correctly.
+**0 = Sunday**. Always use names (`mon-fri`, `sat,sun`) and the confusion disappears. Be careful with
+`CronTrigger.from_crontab(...)` in version 3: it passes the day-of-week numbers through unchanged, so
+`"0 8 * * 1-5"` would mean Tuesday–Saturday there.
 
 **Code — cron** (the OS runs your script; nothing needs to stay running)
 
@@ -3535,10 +3542,14 @@ the client's model sees.
 pip install "mcp[cli]"
 ```
 
-**Code — a FastMCP server wrapping your tools**
+**Code — an MCP server wrapping your tools**
 
-FastMCP builds the input schema from your **type hints** and the description from your **docstring** —
-exactly why Section 1 made you write both.
+The SDK's `MCPServer` class builds each tool's input schema from your **type hints** and its description
+from your **docstring** — exactly why Section 1 made you write both.
+
+> **Version note.** This uses version 2 of the `mcp` package. In version 1 the same class was called
+> `FastMCP` (`from mcp.server.fastmcp import FastMCP`) and is used the same way; you'll see it in many
+> older tutorials. If you must run version-1 code, pin `pip install "mcp[cli]<2"`.
 
 ```python
 # organizer/mcp_server.py
@@ -3547,7 +3558,7 @@ import logging
 import sys
 from datetime import date
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
 from organizer.tools import gcal, gmail
@@ -3555,9 +3566,11 @@ from organizer.tools import gcal, gmail
 # stdio servers must NEVER print to stdout — stdout carries the protocol. Log to stderr.
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
-mcp = FastMCP("work-organizer")
+mcp = MCPServer("work-organizer")
 
-READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+READ_ONLY = ToolAnnotations(
+    read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False
+)
 
 @mcp.tool(annotations=READ_ONLY)
 def list_events_for_day(day: str = "") -> str:
@@ -3597,8 +3610,8 @@ if __name__ == "__main__":
     mcp.run()          # stdio transport by default
 ```
 
-**Annotations** are hints to the client about behaviour (`readOnlyHint`, `destructiveHint`,
-`idempotentHint`, `openWorldHint`). Clients may use them to decide when to ask the user for
+**Annotations** are hints to the client about behaviour (on the wire they're called `readOnlyHint`,
+`destructiveHint`, `idempotentHint`, `openWorldHint`). Clients may use them to decide when to ask the user for
 permission. They are **hints, not security** — your server must still enforce its own rules
 (read-only scopes, confirmation for writes).
 
@@ -3656,7 +3669,7 @@ asyncio.run(main())
 ```
 
 To give these tools to Claude in your own loop, convert each `tool` into
-`{"name": t.name, "description": t.description, "input_schema": t.inputSchema}` and route `tool_use`
+`{"name": t.name, "description": t.description, "input_schema": t.input_schema}` and route `tool_use`
 blocks to `session.call_tool(...)`. Same agent loop as Lesson 3, different dispatcher.
 
 **Remote (HTTP) servers.** `mcp.run(transport="streamable-http")` serves the same tools over HTTP.
@@ -4134,7 +4147,9 @@ aren't known in advance; use plain code when they are.
 | 9 | Lesson 22, Capstone Level 1 | MCP server in Claude Desktop/Code; read-only agent |
 | 10–11 | Capstone Levels 2–3 | Confirmed event creation; scheduled 8am briefing |
 
-**Daily routine (1–2 hours):** 20 min reading → 40 min typing examples against your **test** account →
+The schedule assumes about 1 hour a day; at 2 hours a day, cover two weeks' rows per week.
+
+**Daily routine:** 20 min reading → 40 min typing examples against your **test** account →
 30 min exercises → 5 min writing down what confused you and which scopes/tokens you created.
 
 ---
@@ -4499,4 +4514,4 @@ def find_free_slots(day: str, duration_minutes: int = 30) -> str:
 | modelcontextprotocol.io + the MCP Python SDK on GitHub | Spec / docs | Building and connecting MCP servers |
 | OWASP Top 10 for LLM Applications | Security guide | Prompt injection, excessive agency, SSRF |
 
-**Next:** Section 6 — taking the assistant further: multi-step planning agents, evaluation and testing of agent behaviour, safety guardrails, and deploying it so it runs reliably without your laptop.
+**Next:** Section 6 — Interface (talk to your assistant through a Telegram bot, a web app or voice). Section 7 then runs it 24/7 in the cloud, and Section 8 goes deeper on permissions, prompt injection and sandboxing.
