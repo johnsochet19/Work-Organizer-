@@ -43,7 +43,7 @@ def wikipedia(net: Net, topic: str, n: int) -> list[Item]:
 
 def arxiv(net: Net, topic: str, n: int) -> list[Item]:
     resp = net.get(f"https://export.arxiv.org/api/query?search_query=all:{q(topic)}"
-                   f"&max_results={n}&sortBy=relevance")
+                   f"&max_results={n}&sortBy=relevance", robots=False)
     if not resp.ok or "<!DOCTYPE" in resp.body or "<!ENTITY" in resp.body:
         return []  # a normal Atom feed never declares entities; refuse anything that does
     ns ={"a": "http://www.w3.org/2005/Atom"}
@@ -87,8 +87,7 @@ def openlibrary(net: Net, topic: str, n: int) -> list[Item]:
         first = d.get("first_sentence")
         first = first[0] if isinstance(first, list) and first else (first or "")
         subjects = ", ".join((d.get("subject") or [])[:25])
-        body = (f"{d.get('title')} is a book by {', '.join(d.get('author_name', ['unknown']))}, "
-                f"first published {d.get('first_publish_year', 'n/a')}. {first} Subjects: {subjects}.")
+        body = f"{d.get('title')}. {first} {subjects}."
         out.append(Item(f"https://openlibrary.org{d.get('key', '')}", d.get("title", ""), body))
     return out
 
@@ -109,9 +108,9 @@ def github(net: Net, topic: str, n: int) -> list[Item]:
     data = net.get_json(f"https://api.github.com/search/repositories?per_page={n}&sort=stars&q={q(topic)}")
     out = []
     for r in (data or {}).get("items", []):
-        body = (f"{r['full_name']} is an open-source project written in {r.get('language') or 'various languages'} "
-                f"with {r.get('stargazers_count', 0)} stars. {r.get('description') or ''}. "
-                f"Topics: {', '.join(r.get('topics', []))}.")
+        # describe the project in its own words; avoid template phrases that become fake "concepts"
+        topics = ", ".join(r.get("topics", []))
+        body = f"{r.get('description') or ''}. {('Topics: ' + topics + '.') if topics else ''}"
         out.append(Item(r["html_url"], r["full_name"], body))
     return out
 
@@ -135,7 +134,7 @@ def pubmed(net: Net, topic: str, n: int) -> list[Item]:
         .get("esearchresult", {}).get("idlist", [])
     out = []
     for pid in ids:
-        r = net.get(f"{eu}/efetch.fcgi?db=pubmed&rettype=abstract&retmode=text&id={pid}")
+        r = net.get(f"{eu}/efetch.fcgi?db=pubmed&rettype=abstract&retmode=text&id={pid}", robots=False)
         if r.ok and r.body:
             title = next((ln for ln in r.body.split("\n\n")[1:3] if len(ln) > 20), f"PubMed {pid}")
             out.append(Item(f"https://pubmed.ncbi.nlm.nih.gov/{pid}/", " ".join(title.split()), r.body))

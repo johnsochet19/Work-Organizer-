@@ -131,6 +131,10 @@ class Agent:
             seen_in = row["docs"] if row else 1
             s = (math.log1p(score) * 0.3 + math.log1p(seen_in) * 0.5 + 0.2 * related.get(phrase, 0)
                  + 0.6 * len(words & mission) + 0.3 * len(words & topic_words))
+            norm_words = {_norm(w) for w in words}
+            on_topic = (norm_words & ({_norm(w) for w in mission} | topic_words)) or related.get(phrase, 0) >= 2
+            if not on_topic:
+                s *= 0.3  # stay focused: tangents ("maven compile fails") rank far below related ideas
             scored[phrase] = max(scored.get(phrase, 0), s)
         uniq = {}
         for phrase, s in sorted(scored.items(), key=lambda kv: -kv[1]):

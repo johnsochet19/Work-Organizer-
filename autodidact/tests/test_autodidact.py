@@ -204,3 +204,25 @@ class NetTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LiveRunRegressionTests(unittest.TestCase):
+    """Problems seen on the first live run on GitHub Actions."""
+
+    def test_robots_txt_does_not_block_public_apis(self):
+        # Wikipedia, arXiv and raw.githubusercontent disallow their API paths for crawlers;
+        # API calls must still work, while page crawling keeps obeying robots.txt.
+        web = FakeWeb()
+        net = Net(min_interval=0, transport=web)
+        self.assertEqual(net.get_json("https://blocked.example.org/api"), None)  # 404 from fake, but fetched
+        self.assertIn("https://blocked.example.org/api", web.calls)
+        self.assertEqual(net.get("https://blocked.example.org/page").status, 999)
+
+    def test_followups_stay_on_mission(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = make_agent(tmp)
+            agent.brain.set("mission", "neural network training")
+            spawned = agent.spawn_followups("neural network", 1.0, [
+                ("maven compile fails", 9.0), ("web payments working group", 9.0),
+                ("network training tricks", 4.0)])
+            self.assertEqual(spawned[0], "network training tricks")

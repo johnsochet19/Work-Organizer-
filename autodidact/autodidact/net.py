@@ -98,7 +98,10 @@ class Net:
         h.update(headers or {})
         return self.transport(url, h, self.timeout)
 
-    def get(self, url: str, headers: dict | None = None, use_cache: bool = True) -> Response:
+    def get(self, url: str, headers: dict | None = None, use_cache: bool = True,
+            robots: bool = True) -> Response:
+        """robots=True for crawling web pages. Documented public APIs are meant for programs,
+        and many sites' robots.txt disallow their API paths for crawlers, so API calls pass False."""
         if not url.startswith(("http://", "https://")):
             return Response(url, 0, "unsupported scheme")
         path = self._cache_path(url)
@@ -106,7 +109,7 @@ class Net:
             if time.time() - os.path.getmtime(path) < self.cache_ttl:
                 with open(path, encoding="utf-8") as f:
                     return Response(**json.load(f))
-        if not self.allowed(url):
+        if robots and not self.allowed(url):
             return Response(url, 999, "blocked by robots.txt")
         resp = self._raw(url, headers)
         if resp.ok and path:
@@ -115,7 +118,7 @@ class Net:
         return resp
 
     def get_json(self, url: str, headers: dict | None = None):
-        resp = self.get(url, headers)
+        resp = self.get(url, headers, robots=False)
         if not resp.ok:
             return None
         try:

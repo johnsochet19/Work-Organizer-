@@ -118,7 +118,7 @@ def llm_spec(llm, net: Net, api: dict, topic: str) -> dict | None:
 
 def discover(brain: Brain, net: Net, llm=None, max_probe: int = 6, extra_candidates: list[dict] | None = None):
     """One round of self-extension. Returns the names of sources it added."""
-    resp = net.get(DIRECTORY_URL)
+    resp = net.get(DIRECTORY_URL, robots=False)
     apis = parse_directory(resp.body) if resp.ok else []
     apis += extra_candidates or []
     tried = set(brain.get("tried_apis") or [])
