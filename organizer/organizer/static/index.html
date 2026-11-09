@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Work Organizer</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1c1f24; --muted: #667085; --line: #e3e6eb;
+    --accent: #2f6fde; --accent-text: #ffffff; --me: #e8f0fd; --warn: #b42318; --warn-bg: #fdecea;
+    --ok: #127a3e; --today: #b54708; --approve-bg: #fff8e6; --approve-line: #f0c36a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111316; --panel: #1a1d22; --text: #e7e9ed; --muted: #98a2b3; --line: #2b3038;
+      --accent: #6a9cf5; --accent-text: #0b1220; --me: #1f2a3d; --warn: #f97066; --warn-bg: #3a1d1b;
+      --ok: #47cd89; --today: #fdb022; --approve-bg: #2d2615; --approve-line: #7a5b1c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+           padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 17px; margin: 0; }
+  header .mode { color: var(--muted); font-size: 13px; margin-right: 8px; }
+  @media (max-width: 520px) { header .mode { display: block; margin: 0 0 4px; font-size: 12px; } header > div { text-align: right; } }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; padding: 16px;
+         max-width: 1200px; margin: 0 auto; height: calc(100vh - 54px); }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; height: auto; } #chat { height: 70vh; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; min-height: 0; }
+  #chat { display: flex; flex-direction: column; }
+  #log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 85%; padding: 9px 12px; border-radius: 10px; white-space: pre-wrap; word-wrap: break-word; }
+  .user { align-self: flex-end; background: var(--me); }
+  .assistant { align-self: flex-start; border: 1px solid var(--line); }
+  .meta { align-self: flex-start; color: var(--muted); font-size: 13px; }
+  .approval { align-self: stretch; background: var(--approve-bg); border: 1px solid var(--approve-line);
+              border-radius: 10px; padding: 10px 12px; }
+  .approval pre { white-space: pre-wrap; margin: 6px 0 10px; font: inherit; }
+  form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
+  textarea { flex: 1; resize: none; height: 44px; padding: 10px; border-radius: 8px; border: 1px solid var(--line);
+             background: var(--bg); color: var(--text); font: inherit; }
+  button { border: 0; border-radius: 8px; padding: 0 14px; min-height: 40px; cursor: pointer; font: inherit;
+           background: var(--accent); color: var(--accent-text); }
+  button.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: default; }
+  aside { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+  aside section { padding: 12px 14px; overflow-y: auto; }
+  aside h2 { font-size: 14px; margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  #tasks { flex: 1; }
+  .task { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .task:last-child { border-bottom: 0; }
+  .task input { margin-top: 4px; }
+  .task .due { font-size: 13px; color: var(--muted); }
+  .task.overdue .due { color: var(--warn); font-weight: 600; }
+  .task.today .due { color: var(--today); font-weight: 600; }
+  .p1 { color: var(--warn); font-weight: 600; }
+  #briefing pre { white-space: pre-wrap; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; }
+  .empty { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Work Organizer</h1>
+  <div>
+    <span class="mode" id="mode"></span>
+    <button class="secondary" id="clear" title="Start a fresh conversation">New chat</button>
+  </div>
+</header>
+<main>
+  <section id="chat">
+    <div id="log" aria-live="polite"></div>
+    <form id="form">
+      <textarea id="input" placeholder="Ask me to do something… e.g. “Plan my day” or “Remind me to call Sam at 4pm”" aria-label="Message"></textarea>
+      <button id="send" type="submit">Send</button>
+    </form>
+  </section>
+  <aside>
+    <section id="tasks"><h2>Open tasks</h2><div id="tasklist" class="empty">Loading…</div></section>
+    <section id="briefing" hidden><h2>Morning briefing</h2><pre id="briefingtext"></pre></section>
+  </aside>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const log = $("log");
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : {
+    method: "POST", headers: {"Content-Type": "application/json", "X-Organizer": "1"}, body: JSON.stringify(body)
+  };
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  return r.json();
+}
+
+function add(cls, text) {
+  const d = document.createElement("div");
+  d.className = "msg " + cls;
+  d.textContent = text;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+  return d;
+}
+
+function addApproval(p) {
+  if (document.querySelector(`[data-pending="${p.id}"]`)) return;
+  const box = document.createElement("div");
+  box.className = "approval";
+  box.dataset.pending = p.id;
+  const title = document.createElement("strong");
+  title.textContent = "Needs your approval";
+  const pre = document.createElement("pre");
+  pre.textContent = p.summary;
+  const yes = document.createElement("button");
+  yes.textContent = "Approve";
+  const no = document.createElement("button");
+  no.textContent = "Decline";
+  no.className = "secondary";
+  no.style.marginLeft = "8px";
+  const decide = async (approve) => {
+    yes.disabled = no.disabled = true;
+    try {
+      const r = await api("/api/approve", {id: p.id, approve});
+      box.replaceWith(Object.assign(document.createElement("div"), {className: "msg meta", textContent: r.result}));
+    } catch (e) { add("meta", "Error: " + e.message); yes.disabled = no.disabled = false; }
+    refresh();
+  };
+  yes.onclick = () => decide(true);
+  no.onclick = () => decide(false);
+  box.append(title, pre, yes, no);
+  log.appendChild(box);
+  log.scrollTop = log.scrollHeight;
+}
+
+function renderTasks(tasks) {
+  const list = $("tasklist");
+  list.textContent = "";
+  list.className = tasks.length ? "" : "empty";
+  if (!tasks.length) { list.textContent = "Nothing open. Nice."; return; }
+  for (const t of tasks) {
+    const row = document.createElement("label");
+    row.className = "task" + (t.overdue ? " overdue" : t.today ? " today" : "");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.title = "Mark done";
+    box.onchange = async () => { await api("/api/complete", {id: t.id}); refresh(); };
+    const body = document.createElement("div");
+    const title = document.createElement("div");
+    title.textContent = t.title;
+    if (t.priority === 1) title.className = "p1";
+    const due = document.createElement("div");
+    due.className = "due";
+    const bits = ["#" + t.id];
+    if (t.due) bits.push((t.overdue ? "overdue · " : t.today ? "today · " : "") + t.due.replace("T", " "));
+    if (t.recur) bits.push("repeats " + t.recur);
+    if (t.tags) bits.push(t.tags.split(",").map(x => "#" + x).join(" "));
+    due.textContent = bits.join(" · ");
+    body.append(title, due);
+    row.append(box, body);
+    list.appendChild(row);
+  }
+}
+
+async function refresh(withHistory) {
+  const s = await api("/api/state");
+  renderTasks(s.tasks);
+  $("mode").textContent = s.llm ? "" : "Typed-command mode (no API key)";
+  if (s.briefing) { $("briefing").hidden = false; $("briefingtext").textContent = s.briefing; }
+  if (withHistory) {
+    for (const m of s.history) add(m.role === "user" ? "user" : "assistant", m.text);
+    if (!s.history.length) add("meta", s.llm
+      ? "Hi! I can manage your tasks, remember things, search the web and your documents, and read your calendar and email. What do you need?"
+      : "Hi! Type 'help' to see what I can do. Add an ANTHROPIC_API_KEY to talk to me in plain English.");
+  }
+  for (const p of s.pending) addApproval(p);
+}
+
+$("form").onsubmit = async (e) => {
+  e.preventDefault();
+  const text = $("input").value.trim();
+  if (!text) return;
+  $("input").value = "";
+  add("user", text);
+  const thinking = add("meta", "Working on it…");
+  $("send").disabled = true;
+  try {
+    const r = await api("/api/chat", {message: text});
+    thinking.remove();
+    add("assistant", r.reply || "Done.");
+    for (const p of r.pending) addApproval(p);
+  } catch (err) {
+    thinking.textContent = "Error: " + err.message;
+  } finally {
+    $("send").disabled = false;
+    $("input").focus();
+    refresh();
+  }
+};
+
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("form").requestSubmit(); }
+});
+
+$("clear").onclick = async () => {
+  await api("/api/clear", {});
+  log.textContent = "";
+  add("meta", "Started a fresh conversation. Your tasks, notes and memories are kept.");
+};
+
+refresh(true).catch(e => add("meta", "Couldn't load: " + e.message));
+setInterval(() => refresh().catch(() => {}), 30000);
+</script>
+</body>
+</html>
